@@ -1,485 +1,337 @@
 #!/usr/bin/env node
 
 import readline from 'readline';
-import path from 'path'; 
-// !!! NOTE: UNCOMMENT THE FOLLOWING LINES IN YOUR LOCAL NODE.JS ENVIRONMENT !!!
-// import { spawn } from 'child_process'; 
-// import fetch from 'node-fetch'; 
-// -------------------------------------------------------------------------
+import path from 'path';
 
-// --- CONFIGURATION AND UTILITIES ---
-
-const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'YOUR_OPENAI_API_KEY';
-
-// Your dedicated Ollama models for the batch process
+// --- MOCK DATA ---
+const MOCK_FILE_CONTENTS = {
+    'src/config_setup.py': 'def initialize_engine(): # Setup structures for consensus loop.',
+    'src/data_loader.ts': 'const data = loadExternalData("api/v2"); // Validate and transform.',
+    'docs/reporting_logic.md': '# Generate final report. Key: cross-reference findings.',
+};
+const MOCK_URL_CONTENT = 'Simulated API / external content.';
 const DEDICATED_MODELS = ['loop', '2244', 'code', 'core', 'coin'];
 
-const MOCK_FILE_CONTENTS = {
-    'src/config.py': 'def initialize(): # High-priority setup.',
-    'src/data.ts': 'const data = loadExternalData("api/v2");',
-    'docs/report.md': '# Final Report Generation. Summarize all data.',
-    'internal/setup.txt': 'Initial environment configuration parameters.',
-    'data/metrics.json': '{"value": 42.0, "unit": "entropy"}' 
-};
-const MOCK_URL_CONTENT = 'Dynamic external reference: This content is key to reconciliation.';
+// --- UTILITIES ---
 
-/** Maps file extensions/paths to your dedicated Ollama models. */
 function assignModel(filePath) {
     if (filePath.endsWith('.py') || filePath.endsWith('.ts')) return 'code';
-    if (filePath.endsWith('.md')) return 'coin'; 
+    if (filePath.endsWith('.md')) return 'coin';
     if (filePath.includes('config') || filePath.includes('setup')) return 'core';
     if (filePath.includes('data')) return '2244';
     return 'loop';
 }
 
 function getLabelColor(label) {
-    const hash = label.split('').reduce((acc, char) => char.charCodeAt(0) + acc, 0);
-    const colorCode = 31 + (hash % 6); 
-    return `\x1b[1;${colorCode}m`;
+    const hash = label.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    return `\x1b[1;${31 + (hash % 6)}m`;
 }
 
-function parseFlags(args) {
-    const flags = {};
-    args.forEach(arg => {
-        if (arg.startsWith('--')) {
-            const [key, val] = arg.slice(2).split('=');
-            flags[key] = val === undefined ? true : val; 
-        }
-    });
-    return flags;
-}
+// --- TERMINAL MANAGER (PRIORITY OUTPUT HANDLER) ---
 
-/** SIMULATION of fetch URL content dynamically. */
-async function fetchURLContent(url) {
-    if (url.startsWith('http')) {
-        console.log(`\n\x1b[1;32mhttps://fetch.com/\x1b[0m \x1b[90mSimulating fetch from: ${url}\x1b[0m`);
+/**
+ * Manages cursor positioning and output drawing to ensure the REPL prompt
+ * is never overwritten and remains stable during concurrent batch streaming.
+ */
+class TerminalManager {
+    constructor(dashboardLines) {
+        this.dashboardLines = dashboardLines;
+        // The readline interface is primarily used to manage prompt drawing
+        this.rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+            prompt: '\x1b[1;33mYou >\x1b[0m '
+        });
     }
-    await new Promise(r => setTimeout(r, 200)); 
-    return MOCK_URL_CONTENT;
-}
 
-/** SIMULATION of loading file paths from a glob pattern. */
-function loadFilesFromGlob(pattern) {
-    const allFiles = Object.keys(MOCK_FILE_CONTENTS);
-    
-    const files = allFiles.filter(p => new RegExp(pattern.replace(/\./g, '\\.').replace(/\*/g, '.*')).test(p));
-    
-    if (files.length === 0) {
-        console.warn(`\x1b[33m[WARN]\x1b[0m No files matched pattern '${pattern}'. Using default mock files.`);
-        return allFiles; 
+    /** Clears the current line. */
+    clearLine() {
+        readline.cursorTo(process.stdout, 0);
+        readline.clearLine(process.stdout, 0);
     }
-    return files;
+
+    /** Moves the cursor to the top dashboard region. */
+    moveToDashboard() {
+        readline.cursorTo(process.stdout, 0);
+        // Move up by the height of the dashboard + 1 (for the blank line below it)
+        readline.moveCursor(process.stdout, 0, -(this.dashboardLines + 1));
+    }
+
+    /** Moves the cursor back down past the dashboard region. */
+    movePastDashboard() {
+        readline.moveCursor(process.stdout, 0, this.dashboardLines + 1);
+        readline.cursorTo(process.stdout, 0);
+    }
+
+    /** Redraws the REPL prompt cleanly. */
+    redrawPrompt() {
+        this.rl.prompt(true);
+    }
+
+    /**
+     * Writes streaming output (token by token) safely. This is the critical
+     * method used by both batch and dialog streams to ensure the prompt is 
+     * protected after every write.
+     * @param {string} data - The content to write.
+     * @param {boolean} isNewline - Whether this write includes a final newline.
+     */
+    writeStream(data, isNewline = false) {
+        this.clearLine(); // Clear the current prompt/input line
+        process.stdout.write(data);
+        if (isNewline) process.stdout.write('\n');
+        this.redrawPrompt(); // Redraw the prompt at the bottom
+    }
 }
 
+// --- MOCK STREAMING BACKEND ---
 
-// --- UNIFIED META-CONSENSUS ENGINE ---
+/**
+ * Simulates a token-by-token streaming response from a model using the TM.
+ * @param {string} model - The model name.
+ * @param {string} prompt - The input prompt.
+ * @param {string} prefix - The color-coded prefix for the output line.
+ * @param {TerminalManager} tm - The terminal manager instance.
+ */
+async function streamBackendResponse(model, prompt, prefix = '', tm) {
+    const response = `(MOCK:${model}) Processing: ${prompt.substring(0, 50)}...`;
+    const tokens = response.split(/(\s+)/).filter(t => t.length > 0);
+    
+    // Write prefix once
+    tm.writeStream(prefix);
 
-class UnifiedMetaEngine {
-    constructor({files=[], models=['core'], backend='ollama', apiKey='', maxIter=8, urlContent=''}) {
+    for (const token of tokens) {
+        // Write each token without a newline to stream on the same line
+        tm.writeStream(token, false);
+        await new Promise(r => setTimeout(r, 10 + Math.random() * 5));
+    }
+    
+    // Finish with a final newline for the stream line
+    tm.writeStream('', true); 
+}
+
+// --- META-CONSENSUS BATCH ENGINE ---
+
+class MetaConsensusEngine {
+    constructor(files, maxIter, tm) {
         this.files = files;
-        this.models = models;
-        this.backend = backend;
-        this.apiKey = apiKey;
-        this.maxIter = maxIter;
-        this.urlContent = urlContent;
-        
-        this.states = {}; 
+        this.maxIterations = maxIter;
+        this.tm = tm;
+        this.states = {};
         this.fusedOutput = '';
         this.lastSignature = '';
         this.currentIter = 0;
-        this.dashboardLines = 0;
-        
-        // Dynamic state initialization based on mode
-        if (files.length) {
-            // Batch Mode: states[file_path][model_name]
-            files.forEach(f => {
-                this.states[f] = {};
-                models.forEach(m => {
-                    this.states[f][m] = this._getInitialState(m);
-                });
-            });
-            this.dashboardLines = files.length * models.length + 4; 
-        } else {
-            // Dialog Mode: states[model_name]
-            models.forEach(m => {
-                this.states[m] = this._getInitialState(m);
-            });
-            this.dashboardLines = models.length + 4;
+        this.isComplete = false;
+
+        this.dashboardLines = files.length + 3;
+        files.forEach(f => this.initState(f));
+    }
+
+    initState(f) {
+        this.states[f] = { progress: 0, entropy: Math.random() * 100, influence: 0.6 + Math.random() * 0.4, output: '', model: assignModel(f) };
+    }
+
+    updateState(f) {
+        const s = this.states[f];
+        s.progress = Math.min(1, s.progress + 0.05 + Math.random() * 0.05);
+        s.entropy = Math.max(0, s.entropy - (s.influence * 15 * Math.random() * 0.1));
+        s.influence = Math.min(1, s.influence + (Math.random() - 0.4) * 0.005);
+    }
+
+    /** Draws the dashboard safely at the top of the terminal. */
+    _drawDashboard(converged = false) {
+        this.tm.moveToDashboard();
+
+        const status = this.isComplete ? 'COMPLETE' : (converged ? 'CONVERGED' : 'RUNNING'),
+              color = this.isComplete ? '\x1b[47m\x1b[30m' : (converged ? '\x1b[42m' : '\x1b[44m');
+
+        let out = `${color}| META-CONSENSUS DASHBOARD | ITER:${this.currentIter}/${this.maxIterations} STATUS:${status} | Sig:${this.lastSignature.substring(0, 10)}...\x1b[0m\n`;
+        out += '|--------------------------------------------------------------------------------\n';
+
+        for (const f of this.files) {
+            const s = this.states[f];
+            const c = getLabelColor(f), base = path.basename(f).padEnd(20), mod = s.model.toUpperCase().padEnd(6);
+            const p = (s.progress * 100).toFixed(0).padStart(3);
+            const ebar = '█'.repeat(Math.floor(s.entropy / 10)).padEnd(10);
+            const ibar = '▒'.repeat(Math.floor(s.influence * 10)).padEnd(10);
+
+            out += `| ${c}${base}\x1b[0m (${mod}) | PROG:${p}% | ENT:[\x1b[33m${ebar}\x1b[0m] | INF:[\x1b[35m${ibar}\x1b[0m]\n`;
         }
-    }
+        out += '|--------------------------------------------------------------------------------';
 
-    _getInitialState(model) {
-        return {
-            progress: 0, 
-            entropy: Math.random() * 100, 
-            influence: Math.random() * 0.4 + 0.6, 
-            output: '',
-            model: model
-        };
-    }
-
-    _clearLine() { readline.cursorTo(process.stdout, 0); readline.clearLine(process.stdout, 0); }
-
-    /** Updates state with strict entropy resolution. */
-    updateState(key1, key2 = null) {
-        let s = key2 ? this.states[key1][key2] : this.states[key1];
-        
-        s.progress = Math.min(1, s.progress + 0.05 + Math.random() * 0.02);
-        
-        // Strict Entropy Resolution: Higher Influence rapidly reduces Entropy.
-        const entropyDecay = (s.influence * 15) * Math.random(); 
-        s.entropy = Math.max(0, s.entropy - entropyDecay);
-        
-        s.influence = Math.min(1, s.influence + (Math.random() - 0.4) * 0.01); 
-    }
-    
-    /**
-     * Renders the unified dashboard view. (Full non-flickering implementation)
-     * @param {string} status - Current engine status.
-     */
-    drawDashboard(status = 'RUNNING') { 
-        readline.cursorTo(process.stdout, 0);
-        readline.moveCursor(process.stdout, 0, -this.dashboardLines); 
-        
-        const statusColor = status === 'CONVERGED' ? '\x1b[42m' : '\x1b[44m';
-        const iterDisplay = this.files.length ? `| Iteration: ${this.currentIter}/${this.maxIter}` : ''; 
-        const mode = this.files.length ? 'BATCH STREAM/CONVERGENCE' : 'DIALOG FUSION';
-
-        let dashboardOutput = `${statusColor}| LIVE MODEL DASHBOARD | Mode: ${mode} ${iterDisplay} | STATUS: ${status}\x1b[0m\n`;
-        dashboardOutput += '|--------------------------------------------------------------------------------\n';
-        dashboardOutput += '| NAME                 | PROG  | ENTROPY      | INFLUENCE    \n';
-        dashboardOutput += '|--------------------------------------------------------------------------------\n';
-
-        const renderItem = (key1, key2 = null) => {
-            const s = key2 ? this.states[key1][key2] : this.states[key1];
-            const name = key2 ? `${path.basename(key1)}|${s.model}` : s.model; 
-            const color = getLabelColor(name);
-            const baseName = name.padEnd(20);
-            
-            const perc = (s.progress * 100).toFixed(0).padStart(3) + '%';
-            const entropyBar = '█'.repeat(Math.floor(s.entropy / 10)).padEnd(10);
-            const influenceBar = '▒'.repeat(Math.floor(s.influence * 10)).padEnd(10);
-
-            dashboardOutput += `| ${color}${baseName}\x1b[0m | ${perc.padEnd(5)} | [\x1b[33m${entropyBar}\x1b[0m] | [\x1b[35m${influenceBar}\x1b[0m]\n`;
-        };
-
-        if (this.files.length) {
-            for (const f of this.files) { for (const m of this.models) renderItem(f, m); }
-        } else {
-            for (const m of this.models) renderItem(m); 
-        }
-        
-        dashboardOutput += '|--------------------------------------------------------------------------------';
-
-        // Write dashboard line by line
-        const outputLines = dashboardOutput.split('\n');
-        for (let i = 0; i < this.dashboardLines; i++) { 
-            this._clearLine();
-            if (i < outputLines.length) {
-                process.stdout.write(outputLines[i]);
-            }
+        // Write line by line to prevent flicker and manage cursor
+        const lines = out.split('\n');
+        for (let i = 0; i < this.dashboardLines; i++) {
+            readline.cursorTo(process.stdout, 0);
+            readline.clearLine(process.stdout, 0);
+            if (i < lines.length) process.stdout.write(lines[i]);
             if (i < this.dashboardLines - 1) process.stdout.write('\n');
         }
+
+        // Return cursor control to the main stream area
+        this.tm.movePastDashboard();
+        this.tm.redrawPrompt();
+    }
+
+    fuseOutputs() {
+        const out = this.files.map(f => Array(Math.max(1, Math.floor(this.states[f].influence * 3))).fill(this.states[f].output).join('\n'));
+        this.fusedOutput = out.join('\n--- FUSED ---\n').trim();
+    }
+
+    getSignature(o) { return o.substring(0, 100); }
+
+    async processFile(f, prevFusion) {
+        const s = this.states[f], model = s.model, prompt = `[${model}] Analyze ${f} entropy:${s.entropy.toFixed(1)} prevFusion:${prevFusion.substring(0, 30)}...`;
         
-        // Move cursor down one line past the dashboard footer
-        readline.moveCursor(process.stdout, 0, 1); 
-        readline.cursorTo(process.stdout, 0); 
+        const prefix = `${getLabelColor(f)}[R${this.currentIter}|${path.basename(f)}]\x1b[0m > `;
+
+        this.tm.writeStream(`\n\x1b[90m--- Batch Processing ${path.basename(f)} ---\x1b[0m\n`, true);
+
+        for (let i = 0; i < 3; i++) {
+            this.updateState(f);
+            await new Promise(r => setTimeout(r, 10)); // Short pause for dashboard update
+
+            // Stream batch tokens using the TM
+            await streamBackendResponse(model, prompt, prefix, this.tm);
+            s.output += `(Batch-Token-${i}) `;
+        }
+        this.tm.writeStream(`\x1b[90m--- End ${path.basename(f)} ---\x1b[0m\n`, true);
     }
 
-    /** Helper to simulate one chunk of streaming response from a single model. */
-    async _simulateModelChunk(model) {
-        const token = `TKN_${model}_${Math.random().toFixed(4)} `;
-        await new Promise(r => setTimeout(r, 10 + Math.random() * 20));
-        return token;
-    }
-    
-    /** Helper to simulate a single token chunk for batch mode */
-    async _simulateBatchToken(file, model) {
-        const token = `TKN(${path.basename(file)}|${model})_${Math.random().toFixed(4)} `;
-        await new Promise(r => setTimeout(r, 5 + Math.random() * 15));
-        return token;
-    }
+    /** Main loop, runs as a continuous non-blocking process. */
+    async run() {
+        // Continuous dashboard update loop (runs even when not processing files)
+        const dashboardLoop = setInterval(() => {
+            this._drawDashboard(this.lastSignature.length > 0 && !this.isComplete);
+        }, 100); // Fast update for smooth UI
 
-    /**
-     * Shared token fusion loop that runs generation, metrics update, and fusion
-     * token-by-token for both dialog and batch streaming modes.
-     * @param {Array} units - Array of units {name, models, primaryKey, secondaryKey}
-     * @param {number} maxSteps - Max number of token steps to run.
-     */
-    async _tokenFusionLoop(units, maxSteps = 50) { 
-        let fusionOutputLine = '';
-        
-        for (let i = 0; i < maxSteps; i++) {
-            const responses = {}; 
-            const promises = []; 
-
-            // 1. Generate token for each model/unit simultaneously
-            for (const unit of units) {
-                for (const m of unit.models) {
-                    const key1 = unit.primaryKey;
-                    const key2 = unit.secondaryKey ? m : null;
-
-                    promises.push((async () => {
-                        const state = key2 ? this.states[key1][key2] : this.states[key1];
-                        
-                        const token = key2 
-                            ? await this._simulateBatchToken(key1, key2) 
-                            : await this._simulateModelChunk(key1);
-
-                        state.output += token;
-                        responses[`${unit.name}|${m}`] = token;
-
-                        this.updateState(key1, key2); 
-                        await new Promise(r => setTimeout(r, 15));
-                    })());
-                }
-            } 
-            await Promise.all(promises);
+        for (let iter = 1; iter <= this.maxIterations; iter++) {
+            this.currentIter = iter;
+            this.tm.writeStream(`\n\x1b[1;37m--- META ITERATION ${iter} STARTED ---\x1b[0m\n`, true);
             
-            // 2. Fusion: pick token with highest influence per unit
-            fusionOutputLine = '';
-            
-            for (const unit of units) {
-                let maxInfluence = -1, fusedToken = '';
-                
-                for (const m of unit.models) {
-                    const key1 = unit.primaryKey;
-                    const key2 = unit.secondaryKey ? m : null;
-                    const state = key2 ? this.states[key1][key2] : this.states[key1];
-                    const currentToken = responses[`${unit.name}|${m}`] || '';
-                    
-                    if (currentToken && state.influence > maxInfluence) {
-                        maxInfluence = state.influence;
-                        fusedToken = currentToken;
-                    }
-                }
-                
-                if (fusedToken) {
-                    this.fusedOutput += fusedToken; 
-                    fusionOutputLine += `\x1b[1;36m[META-FUSION|${unit.name}|INF:${maxInfluence.toFixed(2)}]\x1b[0m > ${fusedToken.trim()} `;
-                }
+            const prevFusion = this.fusedOutput;
+
+            // Process all files concurrently
+            await Promise.all(this.files.map(f => this.processFile(f, prevFusion)));
+
+            this.fuseOutputs();
+            const sig = this.getSignature(this.fusedOutput);
+
+            if (this.lastSignature && sig === this.lastSignature) {
+                this.isComplete = true;
+                this.tm.writeStream(`\n\x1b[32m[CONVERGED]\x1b[0m Iteration ${iter}\n`, true);
+                break;
             }
-            
-            this.drawDashboard('FUSING'); 
-            this._clearLine(); 
-            process.stdout.write(fusionOutputLine + '\n');
-            readline.moveCursor(process.stdout, 0, -1); 
-            
-            await new Promise(r => setTimeout(r, 50)); 
-        } 
-        
-        this.drawDashboard('COMPLETE'); 
-        readline.moveCursor(process.stdout, 0, 1);
-        this._clearLine();
+            this.lastSignature = sig;
+
+            this.tm.writeStream(`\n\x1b[1;32m[FUSED OUTPUT Sig:${sig.substring(0, 10)}...]\x1b[0m\n`, true);
+            this.tm.writeStream(this.fusedOutput.substring(0, 300) + '...\n', true);
+        }
+
+        // Cleanup
+        clearInterval(dashboardLoop);
+        this.isComplete = true;
+        this._drawDashboard(true);
+        this.tm.writeStream(`\n\x1b[1;36m[Consensus Complete]\x1b[0m Max iterations reached.\n`, true);
+        this.tm.redrawPrompt();
     }
+}
 
-    /**
-     * Runs interactive dialog using the shared token fusion loop.
-     * @param {string} prompt The user input.
-     */
-    async runDialog(prompt){ 
-        const units=this.models.map(m=>({name:m,models:[m],primaryKey:m,secondaryKey:null})); 
-        this.fusedOutput=''; 
-        for(let i=0;i<this.dashboardLines+1;i++) process.stdout.write('\n'); 
-        this.drawDashboard('INITIALIZING'); 
-        
-        process.stdout.write(`\n\x1b[1;37m--- DIALOG FUSION STARTED ---\x1b[0m\n`); 
-        await this._tokenFusionLoop(units,50); 
-        
-        process.stdout.write(`\n\x1b[1;32m[DIALOG COMPLETE]\x1b[0m\n\x1b[90m${this.fusedOutput.trim()}\x1b[0m\n`); 
-        this.fusedOutput=''; 
+// --- HYBRID MODE ORCHESTRATOR ---
+
+async function startHybridMode(files, models, iterations) {
+    const filePaths = Object.keys(MOCK_FILE_CONTENTS);
+    const dashboardLines = filePaths.length + 3;
+    const tm = new TerminalManager(dashboardLines);
+
+    // Reserve space and draw initial prompt
+    for (let i = 0; i < dashboardLines + 1; i++) {
+        process.stdout.write('\n');
     }
+    tm.redrawPrompt();
 
-    /**
-     * Runs batch processing in the original, multi-iteration convergence mode.
-     */
-    async runBatchConvergence() { 
-        // Print empty lines to reserve space for the dashboard
-        for (let i = 0; i < this.dashboardLines + 1; i++) process.stdout.write('\n'); 
+    const engine = new MetaConsensusEngine(filePaths, iterations, tm);
 
-        for(let iter=1; iter<=this.maxIter; iter++){
-            this.currentIter=iter;
-            
-            const promises=[]; 
-            for(const f of this.files){ 
-                for(const m of this.models){
-                    promises.push((async()=>{
-                        // Simulate parallel processing (non-streaming chunks)
-                        for(let step=0; step<3; step++){
-                            this.updateState(f, m);
-                            // Ensure output for convergence is simple and not token-stream based
-                            this.states[f][m].output += `(Batch-Conv-Token_${m}_${step + iter}) `; 
-                            await new Promise(r=>setTimeout(r, 10));
-                        }
-                    })()); 
-                } 
-            }
-            await Promise.all(promises); 
-            
-            // Simplified Fusion Logic for Convergence
-            let allOutputs=[]; 
-            for(const f of this.files){ 
-                for(const m of this.models){
-                    const s=this.states[f][m]; 
-                    const w=Math.max(1,Math.floor(s.influence*3)); 
-                    // Weighted aggregation based on influence
-                    allOutputs.push(Array(w).fill(`[${path.basename(f)}|${m}] ${this.states[f][m].output}`).join('\n')); 
-                } 
-            } 
-            this.fusedOutput=allOutputs.join('\n--- AGGREGATE ---\n'); 
-            const sig=this.getSignature(this.fusedOutput); 
+    // 1. Start batch process in background
+    const batchPromise = engine.run();
 
-            if(this.lastSignature && sig===this.lastSignature){ 
-                this.drawDashboard('CONVERGED');
-                console.log(`\n\x1b[32m[CONVERGED] at iteration ${iter}\x1b[0m\n`); 
-                break; 
-            } 
-            this.lastSignature=sig; 
-            
-            this.drawDashboard('RUNNING');
-            // Write update below the dashboard
-            console.log(`\x1b[1;32m[ITER ${iter} FUSED SIG:${sig.substring(0,10)}...]\x1b[0m\n`); 
-            await new Promise(r => setTimeout(r, 100));
-        } 
-        this.drawDashboard('COMPLETE');
-        console.log(`\x1b[1;36m[Batch Convergence Complete]\x1b[0m`);
-    }
+    // 2. Setup REPL interaction
+    tm.rl.on('line', async (line) => {
+        const prompt = line.trim();
+        if (prompt.toLowerCase() === 'exit') {
+            tm.rl.close();
+            return;
+        }
+        if (!prompt) {
+            tm.redrawPrompt();
+            return;
+        }
 
-    /**
-     * Runs batch processing in the new, single-pass, token-level stream mode.
-     */
-    async runBatchStream() {
-        const units = this.files.map(f => ({ 
-            name: path.basename(f), 
-            models: this.models, 
-            primaryKey: f, 
-            secondaryKey: true 
+        if (engine.isComplete) {
+            tm.writeStream('\n\x1b[33m[WARN]\x1b[0m Batch process is complete. Dialog fusion ended.\n', true);
+            tm.redrawPrompt();
+            return;
+        }
+
+        tm.writeStream(`\n\x1b[1;37m--- INTERACTIVE QUERY ---\x1b[0m\n`, true);
+
+        // Stream models concurrently using the TM
+        await Promise.all(models.map(async model => {
+            const prefix = `${getLabelColor(model)}[DIALOG|${model}]\x1b[0m > `;
+            await streamBackendResponse(model, prompt, prefix, tm);
         }));
 
-        this.fusedOutput = ''; 
-        // Print empty lines to reserve space for the dashboard
-        for (let i = 0; i < this.dashboardLines + 1; i++) process.stdout.write('\n'); 
-        this.drawDashboard('INITIALIZING'); 
+        tm.writeStream(`\x1b[1;37m--- END QUERY ---\x1b[0m\n`, true);
+        tm.redrawPrompt();
+    });
 
-        process.stdout.write(`\n\x1b[1;37m--- BATCH STREAM FUSION STARTED ---\x1b[0m\n`); 
-        
-        // Use the shared token fusion loop for streaming
-        await this._tokenFusionLoop(units, 40); 
-        
-        process.stdout.write('\n\x1b[1;32m[BATCH STREAM COMPLETE]\x1b[0m Stream finished. Running final signature check...\n');
-        
-        // Final Post-Stream Fusion (to generate the definitive signature)
-        let finalFusedTokens = [];
-        for (const f of this.files) { 
-            const modelTokens = this.models.map(m => this.states[f][m].output.trim().split(/\s+/).filter(t => t.length > 0));
-            const maxTokens = Math.max(...modelTokens.map(t => t.length));
-            
-            for (let i = 0; i < maxTokens; i++) {
-                let maxInfluence = -1;
-                let chosenToken = '';
-                
-                for (let j = 0; j < this.models.length; j++) {
-                    const m = this.models[j];
-                    const s = this.states[f][m];
-                    const tokens = modelTokens[j];
-                    
-                    if (tokens[i] && tokens[i].trim() && s.influence > maxInfluence) { 
-                        maxInfluence = s.influence;
-                        chosenToken = tokens[i];
-                    }
-                }
-                if (chosenToken) finalFusedTokens.push(chosenToken);
-            }
+    tm.rl.on('close', () => {
+        tm.clearLine();
+        console.log('\n\x1b[1;36m[CLI Session]\x1b[0m Ended.');
+        process.exit(0);
+    });
+
+    // Wait for the batch process to finish
+    await batchPromise;
+}
+
+// --- CLI ENTRY POINT ---
+
+function printUsage() {
+    console.log(`\n\x1b[1;37mUsage:\x1b[0m`);
+    console.log(`  \x1b[1;36mnode cli.js hybrid [flags]\x1b[0m  - Runs batch consensus and interactive dialog concurrently.`);
+    console.log(`\n\x1b[1;37mFlags (for hybrid mode):\x1b[0m`);
+    console.log(`  \x1b[35m--models=<name1,name2>\x1b[0m Comma-separated list of models for dialog (default: core,loop).`);
+    console.log(`  \x1b[35m--iterations=<N>\x1b[0m     Max convergence iterations for batch (default: 6).`);
+    console.log(`\nExample:`);
+    console.log(`  node cli.js hybrid --models=core,code --iterations=4`);
+}
+
+async function main() {
+    const args = process.argv.slice(2);
+    const cmd = args[0];
+
+    const flags = {};
+    args.slice(1).forEach(a => {
+        if (a.startsWith('--')) {
+            const [k, v] = a.slice(2).split('=');
+            flags[k] = v === undefined ? true : v;
         }
-        
-        this.fusedOutput = finalFusedTokens.join(' ');
-        const sig = this.getSignature(this.fusedOutput);
+    });
 
-        process.stdout.write(`\n\x1b[1;32m[FINAL STREAM SIG:${sig.substring(0,10)}...]\x1b[0m\n`);
-        this.drawDashboard('COMPLETE');
-        console.log(`\x1b[1;36m[Batch Stream Mode Complete]\x1b[0m`);
-    }
+    if (cmd === 'hybrid') {
+        const models = flags.models ? flags.models.split(',') : ['core', 'loop'];
+        const iterations = flags.iterations ? parseInt(flags.iterations) : 6;
 
-    getSignature(out){return out.substring(0,100);} 
-} 
-
-// --- CLI ENTRY POINT --- 
-async function main(){ 
-    const rawArgs=process.argv.slice(2); 
-    const known=['dialog','batch']; 
-    let command=rawArgs[0],promptArg=null; 
-    
-    // Default prompt behavior: if first arg is not a known command, treat all args as prompt
-    if(!known.includes(command)&&rawArgs.length>0){
-        promptArg=rawArgs.join(' '); 
-        command='dialog';
-    } 
-    
-    const flags=parseFlags(rawArgs); 
-    const backend=flags.backend||'ollama'; 
-    const apiKey=process.env.OPENAI_API_KEY||''; 
-    const models=flags.models?flags.models.split(',').map(x=>x.trim()):['core']; 
-
-    if(command==='dialog'){ 
-        const engine=new UnifiedMetaEngine({models,backend,apiKey}); 
-        
-        if(promptArg){
-            // Immediate run for "node ai_meta_cli.js <prompt>"
-            await engine.runDialog(promptArg); 
-            return;
-        }
-        
-        // Interactive REPL session
-        const rl=readline.createInterface({
-            input:process.stdin,
-            output:process.stdout,
-            prompt:'\x1b[1;33mYou >\x1b[0m '
-        }); 
-        
-        rl.prompt(); 
-        
-        rl.on('line',async line=>{
-            const p=line.trim(); 
-            if(p.toLowerCase()==='exit'){rl.close();return;} 
-            if(!p){rl.prompt();return;} 
-            await engine.runDialog(p); 
-            rl.prompt();
-        }); 
-        
-        rl.on('close',()=>{
-            console.log('\n\x1b[1;36m[CLI DIALOG]\x1b[0m Session ended.'); 
-            process.exit(0);
-        }); 
-    } else if(command==='batch'){ 
-        const filePattern=flags.files||'./src/*';
-        const urlArg = flags.url || 'http://default.mock.url'; 
-        const maxIter=flags.iterations?parseInt(flags.iterations):8;
-        
-        if (isNaN(maxIter) || maxIter <= 0) {
-             console.error(`\x1b[31m[ERROR]\x1b[0m --iterations must be a positive integer.`);
-             return;
-        }
-
-        const filePaths=loadFilesFromGlob(filePattern); 
-        const urlContent=await fetchURLContent(urlArg); 
-        
-        if (filePaths.length === 0) {
-            console.error(`\x1b[31m[ERROR]\x1b[0m No files found for processing.`);
+        if (isNaN(iterations) || iterations <= 0) {
+            console.error(`\x1b[31m[ERROR]\x1b[0m --iterations must be a positive integer.`);
             return;
         }
 
-        const engine=new UnifiedMetaEngine({files:filePaths,models,backend,apiKey,maxIter,urlContent}); 
-        
-        if(flags.stream){
-            await engine.runBatchStream();
-        } else{
-            await engine.runBatchConvergence();
-        } 
+        await startHybridMode(Object.keys(MOCK_FILE_CONTENTS), models, iterations);
     } else {
-        // Fallback for unknown command, though default behavior handles most cases
-        console.error(`\x1b[31m[ERROR]\x1b[0m Unknown command '${command}'`);
-    } 
-} 
+        console.error(`\x1b[31m[ERROR]\x1b[0m Unknown command or mode specified: '${cmd}'`);
+        printUsage();
+    }
+}
 
 main();
