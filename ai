@@ -3,16 +3,18 @@
 import readline from 'readline';
 import path from 'path';
 
-// --- MOCK DATA ---
+// --- CONFIGURABLE CONSTANTS ---
+const DIALOG_HISTORY_HEIGHT = 5; // Lines reserved for the persistent dialog history buffer (including header)
 const MOCK_FILE_CONTENTS = {
     'src/config_setup.py': 'def initialize_engine(): # Setup structures for consensus loop.',
     'src/data_loader.ts': 'const data = loadExternalData("api/v2"); // Validate and transform.',
     'docs/reporting_logic.md': '# Generate final report. Key: cross-reference findings.',
 };
-const MOCK_URL_CONTENT = 'Simulated API / external content.';
 const DEDICATED_MODELS = ['loop', '2244', 'code', 'core', 'coin'];
 
 // --- UTILITIES ---
+
+const KEYWORDS = ['const', 'let', 'var', 'def', 'return', 'if', 'else', 'for', 'while', 'class', 'function', 'import', 'export', 'async', 'await', 'new', 'this', 'set', 'get'];
 
 function assignModel(filePath) {
     if (filePath.endsWith('.py') || filePath.endsWith('.ts')) return 'code';
@@ -24,19 +26,49 @@ function assignModel(filePath) {
 
 function getLabelColor(label) {
     const hash = label.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    return `\x1b[1;${31 + (hash % 6)}m`;
+    return `\x1b[1;${31 + (hash % 6)}m`; // red, green, yellow, blue, magenta, cyan
 }
 
-// --- TERMINAL MANAGER (PRIORITY OUTPUT HANDLER) ---
+/** Colors tokens based on simulated semantic type for better readability. */
+function colorToken(token) {
+    // 1. Strings (handles tokens that start and/or end with quotes, even if incomplete or split)
+    if (token.startsWith('"') || token.startsWith("'") || token.endsWith('"') || token.endsWith("'")) 
+        return `\x1b[32m${token}\x1b[0m`; // Green
+
+    // 2. Keywords
+    if (KEYWORDS.includes(token.toLowerCase())) 
+        return `\x1b[35m${token}\x1b[0m`; // Magenta
+
+    // 3. Numbers
+    if (/^\d+(\.\d+)?$/.test(token)) 
+        return `\x1b[33m${token}\x1b[0m`; // Yellow
+
+    // 4. Punctuation (strict match)
+    if (/^[\(\)\{\}\[\]\.,;:\<\>\=\+\-\*\/%]$/.test(token)) 
+        return `\x1b[1;37m${token}\x1b[0m`; // Bold White
+
+    // 5. Variables/Identifiers (alphanumeric or underscore)
+    if (/^\w+$/.test(token)) 
+        return `\x1b[36m${token}\x1b[0m`; // Cyan
+
+    // 6. Generic/Whitespace/Fallback (e.g., spaces, unclassified words)
+    return token; 
+}
+
+
+// --- TERMINAL MANAGER (Priority Output Handler with History Buffer) ---
 
 /**
- * Manages cursor positioning and output drawing to ensure the REPL prompt
- * is never overwritten and remains stable during concurrent batch streaming.
+ * Manages all cursor positioning and output drawing to guarantee the REPL prompt
+ * and the fixed-height history buffer remain stable during concurrent streaming.
  */
 class TerminalManager {
     constructor(dashboardLines) {
         this.dashboardLines = dashboardLines;
-        // The readline interface is primarily used to manage prompt drawing
+        this.historyHeight = DIALOG_HISTORY_HEIGHT;
+        this.dialogHistory = [];
+        this.currentDialogResponse = ''; // Used to capture the full dialog stream before adding to history
+
         this.rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout,
@@ -44,42 +76,92 @@ class TerminalManager {
         });
     }
 
-    /** Clears the current line. */
     clearLine() {
         readline.cursorTo(process.stdout, 0);
         readline.clearLine(process.stdout, 0);
     }
-
-    /** Moves the cursor to the top dashboard region. */
-    moveToDashboard() {
-        readline.cursorTo(process.stdout, 0);
-        // Move up by the height of the dashboard + 1 (for the blank line below it)
-        readline.moveCursor(process.stdout, 0, -(this.dashboardLines + 1));
-    }
-
-    /** Moves the cursor back down past the dashboard region. */
-    movePastDashboard() {
-        readline.moveCursor(process.stdout, 0, this.dashboardLines + 1);
-        readline.cursorTo(process.stdout, 0);
-    }
-
-    /** Redraws the REPL prompt cleanly. */
+    
     redrawPrompt() {
         this.rl.prompt(true);
     }
 
+    /** Clears and redraws the fixed-height dialog history buffer. */
+    _drawDialogHistory() {
+        // 1. Move cursor to the starting line of the history buffer (above prompt)
+        readline.moveCursor(process.stdout, 0, -(this.historyHeight + 1)); 
+
+        // 2. Clear and redraw the reserved area (History Header + historyHeight - 1 lines)
+        for (let i = 0; i < this.historyHeight; i++) {
+            this.clearLine();
+            if (i < this.historyHeight - 1) process.stdout.write('\n');
+        }
+
+        // 3. Move cursor back up to the start of history area
+        readline.moveCursor(process.stdout, 0, -this.historyHeight);
+
+        // 4. Print history entries
+        const displayHistory = this.dialogHistory.slice(-(this.historyHeight - 1));
+        
+        // History Header
+        this.clearLine();
+        process.stdout.write('\x1b[40m\x1b[1;37m--- DIALOG HISTORY ---\x1b[0m\n');
+        
+        // History entries
+        displayHistory.forEach(entry => {
+            this.clearLine();
+            process.stdout.write(entry.substring(0, process.stdout.columns - 3) + '\n');
+        });
+
+        // 5. Fill remaining space (if history is short)
+        for (let i = displayHistory.length; i < this.historyHeight - 1; i++) {
+            this.clearLine();
+            process.stdout.write('\n');
+        }
+
+        // 6. Move cursor back down to the prompt line
+        readline.cursorTo(process.stdout, 0);
+        this.redrawPrompt();
+    }
+
+    /** Adds a complete, formatted entry to history and triggers a redraw. */
+    addHistoryEntry(entry) {
+        // Remove existing color codes before pushing to history to keep the display clean
+        const cleanEntry = entry.replace(/\x1b\[[0-9;]*m/g, ''); 
+        this.dialogHistory.push(cleanEntry);
+        if (this.dialogHistory.length > 50) this.dialogHistory.shift(); 
+        this._drawDialogHistory();
+    }
+
+    /** Moves the cursor to the dashboard region. */
+    moveToDashboard() {
+        readline.cursorTo(process.stdout, 0);
+        // Move up past the History Buffer and the Dashboard lines
+        readline.moveCursor(process.stdout, 0, -(this.historyHeight + 1 + this.dashboardLines)); 
+    }
+
+    /** Moves the cursor back down past the dashboard region to the stream area. */
+    movePastDashboard() {
+        readline.moveCursor(process.stdout, 0, this.dashboardLines);
+        readline.cursorTo(process.stdout, 0);
+    }
+
     /**
-     * Writes streaming output (token by token) safely. This is the critical
-     * method used by both batch and dialog streams to ensure the prompt is 
-     * protected after every write.
+     * Writes streaming output safely (used for Batch and real-time Dialog tokens).
+     * This handles the constant cursor adjustment needed for concurrent scrolling output.
      * @param {string} data - The content to write.
-     * @param {boolean} isNewline - Whether this write includes a final newline.
+     * @param {boolean} isNewline - Whether this write concludes the line.
      */
     writeStream(data, isNewline = false) {
-        this.clearLine(); // Clear the current prompt/input line
+        // Clear the prompt line
+        this.clearLine();
+        
+        // Move up past the history buffer and print the new stream data
+        readline.moveCursor(process.stdout, 0, -(this.historyHeight + 1));
         process.stdout.write(data);
         if (isNewline) process.stdout.write('\n');
-        this.redrawPrompt(); // Redraw the prompt at the bottom
+
+        // Move back down to the prompt line
+        this._drawDialogHistory(); 
     }
 }
 
@@ -87,26 +169,28 @@ class TerminalManager {
 
 /**
  * Simulates a token-by-token streaming response from a model using the TM.
- * @param {string} model - The model name.
- * @param {string} prompt - The input prompt.
- * @param {string} prefix - The color-coded prefix for the output line.
- * @param {TerminalManager} tm - The terminal manager instance.
+ * @returns {string} The full response (UNCOLORED) for history logging.
  */
 async function streamBackendResponse(model, prompt, prefix = '', tm) {
-    const response = `(MOCK:${model}) Processing: ${prompt.substring(0, 50)}...`;
-    const tokens = response.split(/(\s+)/).filter(t => t.length > 0);
+    // Enhanced mock response string to demonstrate token coloring
+    const response = `(MOCK:${model}) Analyzing: ${prompt.substring(0, 20)}... The code model suggests const variable 'X_MAX' = 10; return X_MAX; The string is "Processed".`;
     
-    // Write prefix once
+    // Split on whitespace OR punctuation OR quote marks to isolate tokens for coloring
+    const tokens = response.split(/(\s+|["']|[\(\)\{\}\[\]\.,;:\<\>\=\+\-\*\/%])/).filter(t => t.length > 0);
+    let fullResponse = '';
+
     tm.writeStream(prefix);
 
     for (const token of tokens) {
-        // Write each token without a newline to stream on the same line
-        tm.writeStream(token, false);
+        // Apply coloring to the token for display
+        const coloredToken = colorToken(token); 
+        tm.writeStream(coloredToken, false);
+        fullResponse += token;
         await new Promise(r => setTimeout(r, 10 + Math.random() * 5));
     }
     
-    // Finish with a final newline for the stream line
     tm.writeStream('', true); 
+    return fullResponse;
 }
 
 // --- META-CONSENSUS BATCH ENGINE ---
@@ -121,7 +205,6 @@ class MetaConsensusEngine {
         this.lastSignature = '';
         this.currentIter = 0;
         this.isComplete = false;
-
         this.dashboardLines = files.length + 3;
         files.forEach(f => this.initState(f));
     }
@@ -137,10 +220,31 @@ class MetaConsensusEngine {
         s.influence = Math.min(1, s.influence + (Math.random() - 0.4) * 0.005);
     }
 
+    /** * NEW: Provides a structured, human-readable summary of a single file's state.
+     */
+    queryState(filePath) {
+        if (this.files.includes(filePath)) {
+            const s = this.states[filePath];
+            const fileBase = path.basename(filePath);
+            
+            const summary = [
+                `Current State for \x1b[1;36m${fileBase}\x1b[0m (Iteration ${this.currentIter}):`,
+                `  \x1b[32mModel:\x1b[0m ${s.model.toUpperCase()}`,
+                `  \x1b[32mProgress:\x1b[0m ${(s.progress * 100).toFixed(1)}%`,
+                `  \x1b[32mEntropy:\x1b[0m ${s.entropy.toFixed(2)} (High value suggests disagreement)`,
+                `  \x1b[32mInfluence:\x1b[0m ${(s.influence * 100).toFixed(1)}% (Weight in final fusion)`,
+                `  \x1b[32mLast Output Snippet:\x1b[0m ${s.output.substring(0, 50).replace(/\n/g, ' ')}...`
+            ];
+            return summary.join('\n');
+        } else {
+            return `\x1b[31m[ERROR]\x1b[0m File \x1b[36m${filePath}\x1b[0m not found in batch list. Current files are: [${this.files.map(f => path.basename(f)).join(', ')}]`;
+        }
+    }
+
     /** Draws the dashboard safely at the top of the terminal. */
     _drawDashboard(converged = false) {
         this.tm.moveToDashboard();
-
+        
         const status = this.isComplete ? 'COMPLETE' : (converged ? 'CONVERGED' : 'RUNNING'),
               color = this.isComplete ? '\x1b[47m\x1b[30m' : (converged ? '\x1b[42m' : '\x1b[44m');
 
@@ -158,7 +262,7 @@ class MetaConsensusEngine {
         }
         out += '|--------------------------------------------------------------------------------';
 
-        // Write line by line to prevent flicker and manage cursor
+        // Write line by line directly to the reserved top area
         const lines = out.split('\n');
         for (let i = 0; i < this.dashboardLines; i++) {
             readline.cursorTo(process.stdout, 0);
@@ -169,7 +273,6 @@ class MetaConsensusEngine {
 
         // Return cursor control to the main stream area
         this.tm.movePastDashboard();
-        this.tm.redrawPrompt();
     }
 
     fuseOutputs() {
@@ -188,7 +291,7 @@ class MetaConsensusEngine {
 
         for (let i = 0; i < 3; i++) {
             this.updateState(f);
-            await new Promise(r => setTimeout(r, 10)); // Short pause for dashboard update
+            await new Promise(r => setTimeout(r, 10)); 
 
             // Stream batch tokens using the TM
             await streamBackendResponse(model, prompt, prefix, this.tm);
@@ -199,10 +302,10 @@ class MetaConsensusEngine {
 
     /** Main loop, runs as a continuous non-blocking process. */
     async run() {
-        // Continuous dashboard update loop (runs even when not processing files)
+        // Continuous dashboard update loop 
         const dashboardLoop = setInterval(() => {
             this._drawDashboard(this.lastSignature.length > 0 && !this.isComplete);
-        }, 100); // Fast update for smooth UI
+        }, 100); 
 
         for (let iter = 1; iter <= this.maxIterations; iter++) {
             this.currentIter = iter;
@@ -232,7 +335,6 @@ class MetaConsensusEngine {
         this.isComplete = true;
         this._drawDashboard(true);
         this.tm.writeStream(`\n\x1b[1;36m[Consensus Complete]\x1b[0m Max iterations reached.\n`, true);
-        this.tm.redrawPrompt();
     }
 }
 
@@ -243,10 +345,11 @@ async function startHybridMode(files, models, iterations) {
     const dashboardLines = filePaths.length + 3;
     const tm = new TerminalManager(dashboardLines);
 
-    // Reserve space and draw initial prompt
-    for (let i = 0; i < dashboardLines + 1; i++) {
+    // Reserve space for all fixed elements (Dashboard + History + Prompt)
+    for (let i = 0; i < dashboardLines + tm.historyHeight + 1; i++) {
         process.stdout.write('\n');
     }
+    tm._drawDialogHistory(); // Draw initial empty history buffer
     tm.redrawPrompt();
 
     const engine = new MetaConsensusEngine(filePaths, iterations, tm);
@@ -257,6 +360,9 @@ async function startHybridMode(files, models, iterations) {
     // 2. Setup REPL interaction
     tm.rl.on('line', async (line) => {
         const prompt = line.trim();
+        const parts = prompt.split(' ');
+        const command = parts[0].toUpperCase();
+        
         if (prompt.toLowerCase() === 'exit') {
             tm.rl.close();
             return;
@@ -266,21 +372,52 @@ async function startHybridMode(files, models, iterations) {
             return;
         }
 
+        // --- NEW: Handle Internal QUERY Command ---
+        if (command === 'QUERY') {
+            const filePath = parts[1];
+            if (!filePath) {
+                 const error = `\x1b[31m[ERROR]\x1b[0m Usage: QUERY <filename>. Available files: [${Object.keys(MOCK_FILE_CONTENTS).join(', ')}]`;
+                 tm.addHistoryEntry(error);
+            } else {
+                tm.addHistoryEntry(`\x1b[1;33mYou:\x1b[0m QUERY ${filePath}`);
+                const result = engine.queryState(filePath);
+                tm.writeStream('\n\x1b[1;37m--- ENGINE STATE QUERY ---\x1b[0m\n', true);
+                tm.writeStream(result + '\n', true);
+                tm.addHistoryEntry(result);
+            }
+            tm.redrawPrompt();
+            return;
+        }
+        // --- END QUERY Command ---
+
+        
+        // Log the user's query to history
+        tm.addHistoryEntry(`\x1b[1;33mYou:\x1b[0m ${prompt}`);
+
         if (engine.isComplete) {
             tm.writeStream('\n\x1b[33m[WARN]\x1b[0m Batch process is complete. Dialog fusion ended.\n', true);
-            tm.redrawPrompt();
             return;
         }
 
         tm.writeStream(`\n\x1b[1;37m--- INTERACTIVE QUERY ---\x1b[0m\n`, true);
+        
+        const responses = {};
 
-        // Stream models concurrently using the TM
+        // Stream models concurrently
         await Promise.all(models.map(async model => {
             const prefix = `${getLabelColor(model)}[DIALOG|${model}]\x1b[0m > `;
-            await streamBackendResponse(model, prompt, prefix, tm);
+            const fullResponse = await streamBackendResponse(model, prompt, prefix, tm);
+            responses[model] = fullResponse;
         }));
 
         tm.writeStream(`\x1b[1;37m--- END QUERY ---\x1b[0m\n`, true);
+
+        // Add all completed model responses to the fixed history buffer
+        Object.entries(responses).forEach(([model, response]) => {
+            const formattedEntry = `${getLabelColor(model)}[${model}]:\x1b[0m ${response}`;
+            tm.addHistoryEntry(formattedEntry);
+        });
+
         tm.redrawPrompt();
     });
 
@@ -299,6 +436,9 @@ async function startHybridMode(files, models, iterations) {
 function printUsage() {
     console.log(`\n\x1b[1;37mUsage:\x1b[0m`);
     console.log(`  \x1b[1;36mnode cli.js hybrid [flags]\x1b[0m  - Runs batch consensus and interactive dialog concurrently.`);
+    console.log(`\n\x1b[1;37mCommands (in Dialog):\x1b[0m`);
+    console.log(`  \x1b[35mQUERY <filename>\x1b[0m - Get real-time status (Progress, Entropy, Influence) of a batch file.`);
+    console.log(`  \x1b[35mexit\x1b[0m             - End the session.`);
     console.log(`\n\x1b[1;37mFlags (for hybrid mode):\x1b[0m`);
     console.log(`  \x1b[35m--models=<name1,name2>\x1b[0m Comma-separated list of models for dialog (default: core,loop).`);
     console.log(`  \x1b[35m--iterations=<N>\x1b[0m     Max convergence iterations for batch (default: 6).`);
