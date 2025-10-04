@@ -42,44 +42,34 @@ function getLabelColor(label) {
 function parseFlags(args) {
     const flags = {};
     args.forEach(arg => {
-        // Handle command without a flag, e.g., 'dialog'
-        if (arg && !arg.startsWith('--')) return;
-        
         if (arg.startsWith('--')) {
             const [key, val] = arg.slice(2).split('=');
-            flags[key] = val === undefined ? true : val;
+            flags[key] = val === undefined ? true : val; 
         }
     });
     return flags;
 }
 
-// --- BACKEND STREAMING IMPLEMENTATION (MOCKED/SIMULATED) ---
-
-/**
- * Executes a prompt against an LLM backend and streams the output.
- * @returns {Promise<string>} The full, final response string.
- */
-async function streamBackendResponse(model, prompt, prefix = '') {
-    // --- REAL BACKEND STREAMING CODE GOES HERE ---
-    /* Uncomment Ollama/OpenAI code from the previous response here.
-    */
-    // --- END REAL BACKEND STREAMING CODE ---
-
-    // --- MOCKED STREAMING FALLBACK ---
-    const promptId = prompt.substring(0, 10).trim();
-    const responseText = `(MOCK: ${model}) Consensus check initiated. Processing request [${promptId}]. Resulting fusion stream...`;
-    
-    // Simulate token streaming
-    const tokens = responseText.split(/(\s+)/).filter(t => t.length > 0);
-    let output = '';
-    
-    for (const token of tokens) {
-        process.stdout.write(prefix + token.trim());
-        output += token;
-        await new Promise(r => setTimeout(r, 5)); 
+/** SIMULATION of fetch URL content dynamically. */
+async function fetchURLContent(url) {
+    if (url.startsWith('http')) {
+        console.log(`\n\x1b[1;32mhttps://fetch.com/\x1b[0m \x1b[90mSimulating fetch from: ${url}\x1b[0m`);
     }
-    process.stdout.write('\n');
-    return output.trim();
+    await new Promise(r => setTimeout(r, 200)); 
+    return MOCK_URL_CONTENT;
+}
+
+/** SIMULATION of loading file paths from a glob pattern. */
+function loadFilesFromGlob(pattern) {
+    const allFiles = Object.keys(MOCK_FILE_CONTENTS);
+    
+    const files = allFiles.filter(p => new RegExp(pattern.replace(/\./g, '\\.').replace(/\*/g, '.*')).test(p));
+    
+    if (files.length === 0) {
+        console.warn(`\x1b[33m[WARN]\x1b[0m No files matched pattern '${pattern}'. Using default mock files.`);
+        return allFiles; 
+    }
+    return files;
 }
 
 
@@ -98,6 +88,7 @@ class UnifiedMetaEngine {
         this.fusedOutput = '';
         this.lastSignature = '';
         this.currentIter = 0;
+        this.dashboardLines = 0;
         
         // Dynamic state initialization based on mode
         if (files.length) {
@@ -108,13 +99,13 @@ class UnifiedMetaEngine {
                     this.states[f][m] = this._getInitialState(m);
                 });
             });
-            this.dashboardLines = files.length * models.length + 3;
+            this.dashboardLines = files.length * models.length + 4; 
         } else {
             // Dialog Mode: states[model_name]
             models.forEach(m => {
                 this.states[m] = this._getInitialState(m);
             });
-            this.dashboardLines = models.length + 3;
+            this.dashboardLines = models.length + 4;
         }
     }
 
@@ -143,370 +134,352 @@ class UnifiedMetaEngine {
         s.influence = Math.min(1, s.influence + (Math.random() - 0.4) * 0.01); 
     }
     
-    drawDashboard(status = 'RUNNING') {
+    /**
+     * Renders the unified dashboard view. (Full non-flickering implementation)
+     * @param {string} status - Current engine status.
+     */
+    drawDashboard(status = 'RUNNING') { 
         readline.cursorTo(process.stdout, 0);
-        // Move cursor up to overwrite previous dashboard
         readline.moveCursor(process.stdout, 0, -this.dashboardLines); 
         
         const statusColor = status === 'CONVERGED' ? '\x1b[42m' : '\x1b[44m';
-        const iterDisplay = this.files.length ? `| Iteration: ${this.currentIter}/${this.maxIter}` : '';
-        const mode = this.files.length ? 'BATCH CONSENSUS' : 'DIALOG FUSION';
+        const iterDisplay = this.files.length ? `| Iteration: ${this.currentIter}/${this.maxIter}` : ''; 
+        const mode = this.files.length ? 'BATCH STREAM/CONVERGENCE' : 'DIALOG FUSION';
 
-        let dashboardOutput = `${statusColor}| LIVE MODEL DASHBOARD | Mode: ${mode}${iterDisplay} | STATUS: ${status}\x1b[0m\n`;
-        dashboardOutput += `|--------------------------------------------------------------------------------\n`;
+        let dashboardOutput = `${statusColor}| LIVE MODEL DASHBOARD | Mode: ${mode} ${iterDisplay} | STATUS: ${status}\x1b[0m\n`;
+        dashboardOutput += '|--------------------------------------------------------------------------------\n';
+        dashboardOutput += '| NAME                 | PROG  | ENTROPY      | INFLUENCE    \n';
+        dashboardOutput += '|--------------------------------------------------------------------------------\n';
 
         const renderItem = (key1, key2 = null) => {
             const s = key2 ? this.states[key1][key2] : this.states[key1];
-            const name = key2 ? `${path.basename(key1)}|${s.model}` : s.model;
+            const name = key2 ? `${path.basename(key1)}|${s.model}` : s.model; 
             const color = getLabelColor(name);
             const baseName = name.padEnd(20);
             
-            const perc = (s.progress * 100).toFixed(0).padStart(3);
+            const perc = (s.progress * 100).toFixed(0).padStart(3) + '%';
             const entropyBar = '█'.repeat(Math.floor(s.entropy / 10)).padEnd(10);
             const influenceBar = '▒'.repeat(Math.floor(s.influence * 10)).padEnd(10);
 
-            dashboardOutput += `| ${color}${baseName}\x1b[0m | PROG: ${perc}% | ENT: [\x1b[33m${entropyBar}\x1b[0m] | INF: [\x1b[35m${influenceBar}\x1b[0m]\n`;
+            dashboardOutput += `| ${color}${baseName}\x1b[0m | ${perc.padEnd(5)} | [\x1b[33m${entropyBar}\x1b[0m] | [\x1b[35m${influenceBar}\x1b[0m]\n`;
         };
 
         if (this.files.length) {
-            for (const f of this.files) { for (const m of this.models) { renderItem(f, m); } }
+            for (const f of this.files) { for (const m of this.models) renderItem(f, m); }
         } else {
-            for (const m of this.models) { renderItem(m); }
+            for (const m of this.models) renderItem(m); 
         }
         
-        dashboardOutput += `|--------------------------------------------------------------------------------`;
+        dashboardOutput += '|--------------------------------------------------------------------------------';
 
+        // Write dashboard line by line
         const outputLines = dashboardOutput.split('\n');
-        for(let i = 0; i < this.dashboardLines; i++) {
-            this._clearLine(); 
+        for (let i = 0; i < this.dashboardLines; i++) { 
+            this._clearLine();
             if (i < outputLines.length) {
                 process.stdout.write(outputLines[i]);
             }
-            if (i < this.dashboardLines - 1) {
-                process.stdout.write('\n');
-            }
+            if (i < this.dashboardLines - 1) process.stdout.write('\n');
         }
         
-        readline.moveCursor(process.stdout, 0, 1);
+        // Move cursor down one line past the dashboard footer
+        readline.moveCursor(process.stdout, 0, 1); 
         readline.cursorTo(process.stdout, 0); 
     }
 
     /** Helper to simulate one chunk of streaming response from a single model. */
-    async _simulateModelChunk(model, prompt) {
+    async _simulateModelChunk(model) {
         const token = `TKN_${model}_${Math.random().toFixed(4)} `;
         await new Promise(r => setTimeout(r, 10 + Math.random() * 20));
         return token;
     }
     
     /** Helper to simulate a single token chunk for batch mode */
-    async _simulateBatchToken(file, model, prompt) {
-        // Simulate complex token based on file and model context
+    async _simulateBatchToken(file, model) {
         const token = `TKN(${path.basename(file)}|${model})_${Math.random().toFixed(4)} `;
         await new Promise(r => setTimeout(r, 5 + Math.random() * 15));
         return token;
     }
 
     /**
-     * Runs interactive dialog with parallel streaming and token-by-token fusion.
-     * @param {string} prompt The user input.
+     * Shared token fusion loop that runs generation, metrics update, and fusion
+     * token-by-token for both dialog and batch streaming modes.
+     * @param {Array} units - Array of units {name, models, primaryKey, secondaryKey}
+     * @param {number} maxSteps - Max number of token steps to run.
      */
-    async runDialog(prompt) {
-        const modelResponses = {};
+    async _tokenFusionLoop(units, maxSteps = 50) { 
+        let fusionOutputLine = '';
         
-        // Initial dashboard draw to reserve space
-        for(let i = 0; i < this.dashboardLines; i++) process.stdout.write('\n');
-        this.drawDashboard('INITIALIZING');
+        for (let i = 0; i < maxSteps; i++) {
+            const responses = {}; 
+            const promises = []; 
 
-        process.stdout.write(`\n\x1b[1;37m--- DIALOG FUSION STARTED ---\x1b[0m\n`);
+            // 1. Generate token for each model/unit simultaneously
+            for (const unit of units) {
+                for (const m of unit.models) {
+                    const key1 = unit.primaryKey;
+                    const key2 = unit.secondaryKey ? m : null;
 
-        const MAX_DIALOG_TOKENS = 50;
+                    promises.push((async () => {
+                        const state = key2 ? this.states[key1][key2] : this.states[key1];
+                        
+                        const token = key2 
+                            ? await this._simulateBatchToken(key1, key2) 
+                            : await this._simulateModelChunk(key1);
 
-        for (let tokenIter = 0; tokenIter < MAX_DIALOG_TOKENS; tokenIter++) { 
-            const modelPromises = this.models.map(async (model) => {
-                const chunk = await this._simulateModelChunk(model, prompt);
-                this.updateState(model);
-                this.states[model].output += chunk; 
-                modelResponses[model] = chunk;
-            });
+                        state.output += token;
+                        responses[`${unit.name}|${m}`] = token;
 
-            await Promise.all(modelPromises); 
-
-            // --- SIMULTANEOUS TOKEN STREAM (Verbose Debug View) ---
-            let individualStreamLine = '';
-            for (const model of this.models) {
-                 const color = getLabelColor(model);
-                 const chunk = modelResponses[model].trim();
-                 individualStreamLine += `${color}[${model}]\x1b[0m > ${chunk.substring(0, 10).padEnd(10)} | `;
-            }
-            this._clearLine();
-            process.stdout.write(`\x1b[90m${individualStreamLine}\x1b[0m\n`);
-
-            // --- FUSION LOGIC ---
-            let maxInfluence = -1;
-            let influencerModel = '';
-            for (const model of this.models) {
-                const s = this.states[model];
-                if (s.influence > maxInfluence) {
-                    maxInfluence = s.influence;
-                    influencerModel = model;
+                        this.updateState(key1, key2); 
+                        await new Promise(r => setTimeout(r, 15));
+                    })());
+                }
+            } 
+            await Promise.all(promises);
+            
+            // 2. Fusion: pick token with highest influence per unit
+            fusionOutputLine = '';
+            
+            for (const unit of units) {
+                let maxInfluence = -1, fusedToken = '';
+                
+                for (const m of unit.models) {
+                    const key1 = unit.primaryKey;
+                    const key2 = unit.secondaryKey ? m : null;
+                    const state = key2 ? this.states[key1][key2] : this.states[key1];
+                    const currentToken = responses[`${unit.name}|${m}`] || '';
+                    
+                    if (currentToken && state.influence > maxInfluence) {
+                        maxInfluence = state.influence;
+                        fusedToken = currentToken;
+                    }
+                }
+                
+                if (fusedToken) {
+                    this.fusedOutput += fusedToken; 
+                    fusionOutputLine += `\x1b[1;36m[META-FUSION|${unit.name}|INF:${maxInfluence.toFixed(2)}]\x1b[0m > ${fusedToken.trim()} `;
                 }
             }
-            let fusedToken = influencerModel ? modelResponses[influencerModel] || '' : '';
             
-            // Stream Fused Meta-Response
-            process.stdout.write(`\x1b[1;36m[META-FUSION|INF:${maxInfluence.toFixed(2)}]\x1b[0m > ${fusedToken.trim()} `);
-            this.fusedOutput += fusedToken;
+            this.drawDashboard('FUSING'); 
+            this._clearLine(); 
+            process.stdout.write(fusionOutputLine + '\n');
+            readline.moveCursor(process.stdout, 0, -1); 
             
-            this.drawDashboard('FUSING');
-            
-            if (tokenIter > 30 && Math.random() < 0.3) break;
-        }
-
-        this.drawDashboard('COMPLETE');
-        process.stdout.write('\n\x1b[1;32m[DIALOG COMPLETE]\x1b[0m Fusion stream ended.\n');
+            await new Promise(r => setTimeout(r, 50)); 
+        } 
+        
+        this.drawDashboard('COMPLETE'); 
+        readline.moveCursor(process.stdout, 0, 1);
+        this._clearLine();
     }
 
     /**
-     * Runs batch processing with token-level streaming and real-time fusion race visualization.
+     * Runs interactive dialog using the shared token fusion loop.
+     * @param {string} prompt The user input.
      */
-    async runBatch() { 
-        const MAX_STREAM_STEPS = 40; 
+    async runDialog(prompt){ 
+        const units=this.models.map(m=>({name:m,models:[m],primaryKey:m,secondaryKey:null})); 
+        this.fusedOutput=''; 
+        for(let i=0;i<this.dashboardLines+1;i++) process.stdout.write('\n'); 
+        this.drawDashboard('INITIALIZING'); 
         
-        for (let iter = 1; iter <= this.maxIter; iter++) {
-            this.currentIter = iter;
-            process.stdout.write(`\n\x1b[1;37m--- BATCH ITERATION ${iter} STREAMING RACE ---\x1b[0m\n`); 
+        process.stdout.write(`\n\x1b[1;37m--- DIALOG FUSION STARTED ---\x1b[0m\n`); 
+        await this._tokenFusionLoop(units,50); 
+        
+        process.stdout.write(`\n\x1b[1;32m[DIALOG COMPLETE]\x1b[0m\n\x1b[90m${this.fusedOutput.trim()}\x1b[0m\n`); 
+        this.fusedOutput=''; 
+    }
+
+    /**
+     * Runs batch processing in the original, multi-iteration convergence mode.
+     */
+    async runBatchConvergence() { 
+        // Print empty lines to reserve space for the dashboard
+        for (let i = 0; i < this.dashboardLines + 1; i++) process.stdout.write('\n'); 
+
+        for(let iter=1; iter<=this.maxIter; iter++){
+            this.currentIter=iter;
             
-            let tokenPosition = 0;
-
-            // Reset outputs for new iteration
-            for (const f of this.files) {
-                for (const m of this.models) {
-                    this.states[f][m].output = '';
-                }
-            }
-
-            // --- 1. Token Race Loop (Visualization) ---
-            while (tokenPosition < MAX_STREAM_STEPS) {
-                tokenPosition++;
-                
-                const chunkPromises = [];
-                
-                // Run a parallel task for every file/model to generate one token chunk
-                for (const f of this.files) {
-                    for (const m of this.models) {
-                        // Ensure we only generate new tokens if the current output length is less than the current token position
-                        if (this.states[f][m].output.trim().split(/\s+/).length >= tokenPosition) continue;
-
-                        chunkPromises.push((async () => {
-                            const chunk = await this._simulateBatchToken(f, m, this.urlContent);
-                            this.updateState(f, m); // Update metrics
-                            this.states[f][m].output += chunk;
-                        })());
-                    }
-                }
-
-                if (chunkPromises.length === 0 && tokenPosition > 1) {
-                    break; 
-                }
-
-                await Promise.all(chunkPromises);
-                this.drawDashboard('STREAMING');
-
-                // --- 2. Live Fusion (Token-by-Token across ALL file/model results) ---
-                
-                let liveFusionResult = '';
-
-                for (const f of this.files) {
-                    let maxInfluence = -1;
-                    let chosenToken = '';
-                    
-                    for (const m of this.models) {
-                        const s = this.states[f][m];
-                        const tokens = s.output.trim().split(/\s+/);
-                        
-                        // Check if a token exists at the current step position
-                        if (tokens.length > tokenPosition - 1) {
-                            if (s.influence > maxInfluence) {
-                                maxInfluence = s.influence;
-                                chosenToken = tokens[tokenPosition - 1]; // Select the token chunk generated in this step
-                            }
+            const promises=[]; 
+            for(const f of this.files){ 
+                for(const m of this.models){
+                    promises.push((async()=>{
+                        // Simulate parallel processing (non-streaming chunks)
+                        for(let step=0; step<3; step++){
+                            this.updateState(f, m);
+                            // Ensure output for convergence is simple and not token-stream based
+                            this.states[f][m].output += `(Batch-Conv-Token_${m}_${step + iter}) `; 
+                            await new Promise(r=>setTimeout(r, 10));
                         }
-                    }
-                    
-                    // Print the fused token for this file's consensus point
-                    if (chosenToken) {
-                        const color = getLabelColor(f);
-                        liveFusionResult += `${color}[FUSED:${path.basename(f)}|INF:${maxInfluence.toFixed(2)}]\x1b[0m ${chosenToken.trim()} `;
-                    }
-                }
-
-                // Print the live stream line
-                this._clearLine();
-                process.stdout.write(`\x1b[1;36m[LIVE BATCH STREAM]\x1b[0m > ${liveFusionResult}\n`); 
-                await new Promise(r => setTimeout(r, 20));
-            } // End streaming loop
-
-            // 3. Post-Stream Convergence Check (Final Token Fusion for Signature)
-            
-            let finalFusedTokens = [];
-            for (const f of this.files) { 
-                const modelTokens = this.models.map(m => this.states[f][m].output.trim().split(/\s+/));
-                const maxTokens = Math.max(...modelTokens.map(t => t.length));
-                
-                for (let i = 0; i < maxTokens; i++) {
-                    let maxInfluence = -1;
-                    let chosenToken = '';
-                    
-                    for (let j = 0; j < this.models.length; j++) {
-                        const m = this.models[j];
-                        const s = this.states[f][m];
-                        const tokens = modelTokens[j];
-                        
-                        if (tokens[i] && s.influence > maxInfluence) {
-                            maxInfluence = s.influence;
-                            chosenToken = tokens[i];
-                        }
-                    }
-                    if (chosenToken) finalFusedTokens.push(chosenToken);
-                }
+                    })()); 
+                } 
             }
+            await Promise.all(promises); 
             
-            this.fusedOutput = finalFusedTokens.join(' ');
-            const sig = this.getSignature(this.fusedOutput);
+            // Simplified Fusion Logic for Convergence
+            let allOutputs=[]; 
+            for(const f of this.files){ 
+                for(const m of this.models){
+                    const s=this.states[f][m]; 
+                    const w=Math.max(1,Math.floor(s.influence*3)); 
+                    // Weighted aggregation based on influence
+                    allOutputs.push(Array(w).fill(`[${path.basename(f)}|${m}] ${this.states[f][m].output}`).join('\n')); 
+                } 
+            } 
+            this.fusedOutput=allOutputs.join('\n--- AGGREGATE ---\n'); 
+            const sig=this.getSignature(this.fusedOutput); 
 
-            if (this.lastSignature && sig === this.lastSignature) {
+            if(this.lastSignature && sig===this.lastSignature){ 
                 this.drawDashboard('CONVERGED');
-                console.log(`\n\x1b[32m[CONVERGED] at iteration ${iter}\x1b[0m\n`);
-                break;
-            }
+                console.log(`\n\x1b[32m[CONVERGED] at iteration ${iter}\x1b[0m\n`); 
+                break; 
+            } 
+            this.lastSignature=sig; 
             
-            this.lastSignature = sig;
-            process.stdout.write(`\n\x1b[1;32m[ITER ${iter} FUSED SIG:${sig.substring(0,10)}...]\x1b[0m\n`);
             this.drawDashboard('RUNNING');
+            // Write update below the dashboard
+            console.log(`\x1b[1;32m[ITER ${iter} FUSED SIG:${sig.substring(0,10)}...]\x1b[0m\n`); 
+            await new Promise(r => setTimeout(r, 100));
         } 
         this.drawDashboard('COMPLETE');
-        console.log(`\x1b[1;36m[Batch Meta-Consensus Complete]\x1b[0m`);
+        console.log(`\x1b[1;36m[Batch Convergence Complete]\x1b[0m`);
     }
 
-    getSignature(output) { return output.substring(0, 100); }
-}
+    /**
+     * Runs batch processing in the new, single-pass, token-level stream mode.
+     */
+    async runBatchStream() {
+        const units = this.files.map(f => ({ 
+            name: path.basename(f), 
+            models: this.models, 
+            primaryKey: f, 
+            secondaryKey: true 
+        }));
 
-// --- CLI UTILITIES AND ENTRY POINT ---
+        this.fusedOutput = ''; 
+        // Print empty lines to reserve space for the dashboard
+        for (let i = 0; i < this.dashboardLines + 1; i++) process.stdout.write('\n'); 
+        this.drawDashboard('INITIALIZING'); 
 
-function printUsage() {
-    console.log(`\n\x1b[1;37mUsage: node ai_meta_cli.js <command> [flags]\x1b[0m`);
-    console.log(`\nCommands:`);
-    console.log(`  \x1b[1;36mdialog\x1b[0m [flags]     - Starts a multi-model, fused, streaming REPL session.`);
-    console.log(`  \x1b[1;36mbatch\x1b[0m   [flags]     - Runs concurrent, converging meta-consensus on files.`);
-    
-    console.log(`\n\x1b[1;37mFlags:\x1b[0m`);
-    console.log(`  \x1b[35m--models=<name1,name2>\x1b[0m (Both) Comma-separated list of models (default: core).`);
-    console.log(`  \x1b[35m--files=<glob>\x1b[0m         (Batch) Glob pattern to load files (simulated).`);
-    console.log(`  \x1b[35m--iterations=<N>\x1b[0m     (Batch) Max convergence iterations (default: 8).`);
-    
-    console.log(`\nExample:`);
-    console.log(`  node ai_meta_cli.js dialog --models=loop,code,coin`);
-    console.log(`  node ai_meta_cli.js batch --files="*.py" --models=core,2244\n`);
-}
-
-/** SIMULATION of fetch URL content dynamically. */
-async function fetchURLContent(url) {
-    if (url.startsWith('http')) {
-        console.log(`\n\x1b[1;32mhttps://fetch.com/\x1b[0m \x1b[90mSimulating fetch from: ${url}\x1b[0m`);
-    }
-    await new Promise(r => setTimeout(r, 200)); 
-    return MOCK_URL_CONTENT;
-}
-
-/** SIMULATION of loading file paths from a glob pattern. */
-function loadFilesFromGlob(pattern) {
-    const allFiles = Object.keys(MOCK_FILE_CONTENTS);
-    
-    const files = allFiles.filter(p => new RegExp(pattern.replace(/\./g, '\\.').replace(/\*/g, '.*')).test(p));
-    
-    if (files.length === 0) {
-        console.warn(`\x1b[33m[WARN]\x1b[0m No files matched pattern '${pattern}'. Using default mock files.`);
-        return allFiles; 
-    }
-    return files;
-}
-
-async function main() {
-    const rawArgs = process.argv.slice(2);
-    const command = rawArgs[0];
-    const flagArgs = rawArgs.slice(1);
-    const flags = parseFlags(rawArgs); // Use rawArgs to ensure command is included in flags check
-    
-    if (!command) {
-        printUsage();
-        return;
-    }
-
-    const backend = flags.backend || 'ollama';
-    const apiKey = process.env.OPENAI_API_KEY || '';
-    const models = flags.models ? flags.models.split(',').map(m => m.trim()) : ['core'];
-
-    if (command === 'dialog') {
-        const engine = new UnifiedMetaEngine({ models, backend, apiKey });
+        process.stdout.write(`\n\x1b[1;37m--- BATCH STREAM FUSION STARTED ---\x1b[0m\n`); 
         
-        const rl = readline.createInterface({ 
-            input: process.stdin, 
-            output: process.stdout, 
-            prompt: '\x1b[1;33mYou >\x1b[0m ' 
-        });
-
-        rl.prompt();
-
-        rl.on('line', async (line) => {
-            const prompt = line.trim();
-            if (prompt.toLowerCase() === 'exit') { rl.close(); return; }
-            if (!prompt) { rl.prompt(); return; }
+        // Use the shared token fusion loop for streaming
+        await this._tokenFusionLoop(units, 40); 
+        
+        process.stdout.write('\n\x1b[1;32m[BATCH STREAM COMPLETE]\x1b[0m Stream finished. Running final signature check...\n');
+        
+        // Final Post-Stream Fusion (to generate the definitive signature)
+        let finalFusedTokens = [];
+        for (const f of this.files) { 
+            const modelTokens = this.models.map(m => this.states[f][m].output.trim().split(/\s+/).filter(t => t.length > 0));
+            const maxTokens = Math.max(...modelTokens.map(t => t.length));
             
-            try {
-                await engine.runDialog(prompt);
-            } catch (err) {
-                console.error(`\n\x1b[31m[ERROR]\x1b[0m Fusion failure: ${err.message}`);
+            for (let i = 0; i < maxTokens; i++) {
+                let maxInfluence = -1;
+                let chosenToken = '';
+                
+                for (let j = 0; j < this.models.length; j++) {
+                    const m = this.models[j];
+                    const s = this.states[f][m];
+                    const tokens = modelTokens[j];
+                    
+                    if (tokens[i] && tokens[i].trim() && s.influence > maxInfluence) { 
+                        maxInfluence = s.influence;
+                        chosenToken = tokens[i];
+                    }
+                }
+                if (chosenToken) finalFusedTokens.push(chosenToken);
             }
+        }
+        
+        this.fusedOutput = finalFusedTokens.join(' ');
+        const sig = this.getSignature(this.fusedOutput);
+
+        process.stdout.write(`\n\x1b[1;32m[FINAL STREAM SIG:${sig.substring(0,10)}...]\x1b[0m\n`);
+        this.drawDashboard('COMPLETE');
+        console.log(`\x1b[1;36m[Batch Stream Mode Complete]\x1b[0m`);
+    }
+
+    getSignature(out){return out.substring(0,100);} 
+} 
+
+// --- CLI ENTRY POINT --- 
+async function main(){ 
+    const rawArgs=process.argv.slice(2); 
+    const known=['dialog','batch']; 
+    let command=rawArgs[0],promptArg=null; 
+    
+    // Default prompt behavior: if first arg is not a known command, treat all args as prompt
+    if(!known.includes(command)&&rawArgs.length>0){
+        promptArg=rawArgs.join(' '); 
+        command='dialog';
+    } 
+    
+    const flags=parseFlags(rawArgs); 
+    const backend=flags.backend||'ollama'; 
+    const apiKey=process.env.OPENAI_API_KEY||''; 
+    const models=flags.models?flags.models.split(',').map(x=>x.trim()):['core']; 
+
+    if(command==='dialog'){ 
+        const engine=new UnifiedMetaEngine({models,backend,apiKey}); 
+        
+        if(promptArg){
+            // Immediate run for "node ai_meta_cli.js <prompt>"
+            await engine.runDialog(promptArg); 
+            return;
+        }
+        
+        // Interactive REPL session
+        const rl=readline.createInterface({
+            input:process.stdin,
+            output:process.stdout,
+            prompt:'\x1b[1;33mYou >\x1b[0m '
+        }); 
+        
+        rl.prompt(); 
+        
+        rl.on('line',async line=>{
+            const p=line.trim(); 
+            if(p.toLowerCase()==='exit'){rl.close();return;} 
+            if(!p){rl.prompt();return;} 
+            await engine.runDialog(p); 
             rl.prompt();
-        });
-
-        rl.on('close', () => {
-            console.log('\n\x1b[1;36m[CLI DIALOG]\x1b[0m Session ended.');
+        }); 
+        
+        rl.on('close',()=>{
+            console.log('\n\x1b[1;36m[CLI DIALOG]\x1b[0m Session ended.'); 
             process.exit(0);
-        });
-
-    } else if (command === 'batch') {
-        const filePattern = flags.files || './src/*';
-        const urlArg = flags.url || 'http://default.mock.url';
-        const maxIter = flags.iterations ? parseInt(flags.iterations) : 8;
-
+        }); 
+    } else if(command==='batch'){ 
+        const filePattern=flags.files||'./src/*';
+        const urlArg = flags.url || 'http://default.mock.url'; 
+        const maxIter=flags.iterations?parseInt(flags.iterations):8;
+        
         if (isNaN(maxIter) || maxIter <= 0) {
              console.error(`\x1b[31m[ERROR]\x1b[0m --iterations must be a positive integer.`);
              return;
         }
 
-        const filePaths = loadFilesFromGlob(filePattern);
-        const urlContent = await fetchURLContent(urlArg);
-
+        const filePaths=loadFilesFromGlob(filePattern); 
+        const urlContent=await fetchURLContent(urlArg); 
+        
         if (filePaths.length === 0) {
             console.error(`\x1b[31m[ERROR]\x1b[0m No files found for processing.`);
             return;
         }
 
-        const engine = new UnifiedMetaEngine({
-            files: filePaths, 
-            models: models, 
-            backend: backend, 
-            apiKey: apiKey, 
-            maxIter: maxIter,
-            urlContent: urlContent
-        });
+        const engine=new UnifiedMetaEngine({files:filePaths,models,backend,apiKey,maxIter,urlContent}); 
         
-        await engine.runBatch();
+        if(flags.stream){
+            await engine.runBatchStream();
+        } else{
+            await engine.runBatchConvergence();
+        } 
     } else {
-        console.error(`\x1b[31m[ERROR]\x1b[0m Unknown command: '${command}'`);
-        printUsage();
-    }
-}
+        // Fallback for unknown command, though default behavior handles most cases
+        console.error(`\x1b[31m[ERROR]\x1b[0m Unknown command '${command}'`);
+    } 
+} 
 
 main();
