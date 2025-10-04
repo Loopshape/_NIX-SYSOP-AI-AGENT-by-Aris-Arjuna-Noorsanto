@@ -1,477 +1,507 @@
-#!/usr/bin/env node
+#!/bin/bash
 
-import readline from 'readline';
-import path from 'path';
+# ███████╗██╗   ██╗███████╗ ██████╗ ██████╗ █████╗ ██╗
+# ██╔════╝╚██╗ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║
+# ███████╗ ╚████╔╝ █████╗  ██║   ██║██████╔╝███████║██║
+# ╚════██║  ╚██╔╝  ██╔══╝  ██║   ██║██╔═══╝ ██╔══██║██║
+# ███████║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗
+# ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝
+#
+# A self-contained AI orchestration framework for local LLMs.
+# Version: 2.1.0 (Extended Default Prompt Behavior)
 
-// --- CONFIGURABLE CONSTANTS ---
-const DIALOG_HISTORY_HEIGHT = 5; // Lines reserved for the persistent dialog history buffer (including header)
-const MOCK_FILE_CONTENTS = {
-    'src/config_setup.py': 'def initialize_engine(): # Setup structures for consensus loop.',
-    'src/data_loader.ts': 'const data = loadExternalData("api/v2"); // Validate and transform.',
-    'docs/reporting_logic.md': '# Generate final report. Key: cross-reference findings.',
-};
-const DEDICATED_MODELS = ['loop', '2244', 'code', 'core', 'coin'];
+# --- Environment & Configuration ---
+export AI_HOME="${AI_HOME:-$HOME/.sysop-ai}"
+export TASKS_DIR="$AI_HOME/tasks"
+export PROJECTS_DIR="$AI_HOME/projects"
+export DB_DIR="$AI_HOME/db"
+export SSH_DIR="$AI_HOME/ssh"
+export AI_DATA_DB="$DB_DIR/ai_data.db"
+export BLOBS_DB="$DB_DIR/blobs.db"
+export WALLET_DB="$DB_DIR/wallet.db"
+export SESSION_FILE="$AI_HOME/.session"
+export OLLAMA_BIN="ollama"
 
-// --- UTILITIES ---
+# --- Utility Functions ---
 
-const KEYWORDS = ['const', 'let', 'var', 'def', 'return', 'if', 'else', 'for', 'while', 'class', 'function', 'import', 'export', 'async', 'await', 'new', 'this', 'set', 'get'];
-
-function assignModel(filePath) {
-    if (filePath.endsWith('.py') || filePath.endsWith('.ts')) return 'code';
-    if (filePath.endsWith('.md')) return 'coin';
-    if (filePath.includes('config') || filePath.includes('setup')) return 'core';
-    if (filePath.includes('data')) return '2244';
-    return 'loop';
+# Check for required dependencies
+check_dependencies() {
+    local missing_deps=()
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        echo "Error: Missing required dependencies: ${missing_deps[*]}. Please install them and try again."
+        exit 1
+    fi
 }
 
-function getLabelColor(label) {
-    const hash = label.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    return `\x1b[1;${31 + (hash % 6)}m`; // red, green, yellow, blue, magenta, cyan
-}
+# Setup the entire AI environment, including embedded scripts
+setup_environment() {
+    mkdir -p "$AI_HOME" "$TASKS_DIR" "$PROJECTS_DIR" "$DB_DIR" "$SSH_DIR"
+    
+    # Write the JavaScript Orchestrator (Updated below)
+    # The new version includes dynamic S:I:R logic.
+    cat > "$AI_HOME/orchestrator.js" << 'EOF'
+const { exec } = require('child_process');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
 
-/** Colors tokens based on simulated semantic type for better readability. */
-function colorToken(token) {
-    // 1. Strings (handles tokens that start and/or end with quotes, even if incomplete or split)
-    if (token.startsWith('"') || token.startsWith("'") || token.endsWith('"') || token.endsWith("'")) 
-        return `\x1b[32m${token}\x1b[0m`; // Green
+const AI_HOME = process.env.AI_HOME;
+const PROJECTS_DIR = process.env.PROJECTS_DIR;
+const AI_DATA_DB_PATH = process.env.AI_DATA_DB;
+const BLOBS_DB_PATH = process.env.BLOBS_DB;
+const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 
-    // 2. Keywords
-    if (KEYWORDS.includes(token.toLowerCase())) 
-        return `\x1b[35m${token}\x1b[0m`; // Magenta
+// Note: Consolidated model pool for simplicity in this version.
+const MODEL_POOL = ["phi3", "llama3", "codegemma"];
 
-    // 3. Numbers
-    if (/^\d+(\.\d+)?$/.test(token)) 
-        return `\x1b[33m${token}\x1b[0m`; // Yellow
-
-    // 4. Punctuation (strict match)
-    if (/^[\(\)\{\}\[\]\.,;:\<\>\=\+\-\*\/%]$/.test(token)) 
-        return `\x1b[1;37m${token}\x1b[0m`; // Bold White
-
-    // 5. Variables/Identifiers (alphanumeric or underscore)
-    if (/^\w+$/.test(token)) 
-        return `\x1b[36m${token}\x1b[0m`; // Cyan
-
-    // 6. Generic/Whitespace/Fallback (e.g., spaces, unclassified words)
-    return token; 
-}
-
-
-// --- TERMINAL MANAGER (Priority Output Handler with History Buffer) ---
+const aiDataDb = new sqlite3.Database(AI_DATA_DB_PATH);
+const blobsDb = new sqlite3.Database(BLOBS_DB_PATH);
 
 /**
- * Manages all cursor positioning and output drawing to guarantee the REPL prompt
- * and the fixed-height history buffer remain stable during concurrent streaming.
+ * ProofTracker implements the S:I:R (Stability:Interaction:Resonance) dynamic state.
+ * Stability (NetWorthIndex) controls the convergence threshold.
+ * Interaction/Resonance (EntropyRatio) controls the model generation temperature.
  */
-class TerminalManager {
-    constructor(dashboardLines) {
-        this.dashboardLines = dashboardLines;
-        this.historyHeight = DIALOG_HISTORY_HEIGHT;
-        this.dialogHistory = [];
-        this.currentDialogResponse = ''; // Used to capture the full dialog stream before adding to history
+class ProofTracker {
+    constructor(initialPrompt) {
+        // Stability based on complexity/length (S)
+        this.cycleIndex = initialPrompt.length;
+        this.netWorthIndex = (this.cycleIndex % 128) << 2;
+        // Initial entropy based on prompt and time (I:R)
+        this.entropyRatio = (this.cycleIndex ^ Date.now()) / 1000;
+    }
+    
+    /** Updates entropy based on hash of fused output (Interaction/Resonance). */
+    crosslineEntropy(data) {
+        const hash = crypto.createHash('sha256').update(data).digest('hex');
+        // Add a portion of the hash to increase entropy on divergence
+        this.entropyRatio += parseInt(hash.substring(0, 8), 16) / 1000000;
+    }
 
-        this.rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-            prompt: '\x1b[1;33mYou >\x1b[0m '
+    /** Updates Stability (NetWorthIndex) based on convergence. */
+    proofCycle(converged) {
+        this.cycleIndex += converged ? 1 : 0;
+        // Stability decreases if no convergence (loss of coherence)
+        this.netWorthIndex -= converged ? 0 : 1;
+        this.netWorthIndex = Math.max(0, this.netWorthIndex); // Prevent negative stability
+    }
+    
+    getState() { return { cycleIndex: this.cycleIndex, netWorthIndex: this.netWorthIndex, entropyRatio: this.entropyRatio }; }
+
+    getDynamicTemperature() {
+        const { entropyRatio } = this.getState();
+        // Normalization: Map entropy to a safe temperature range [0.3, 0.9].
+        const normalizedEntropy = Math.min(1, entropyRatio / 50000);
+        let dynamicTemp = 0.3 + (normalizedEntropy * 0.6);
+        return Math.min(0.95, Math.max(0.05, dynamicTemp));
+    }
+
+    getDynamicConvergenceThreshold() {
+        const { netWorthIndex } = this.getState();
+        const initialIndex = this.cycleIndex; 
+        const maxNetWorthIndex = (initialIndex % 128) << 2;
+        
+        // Normalize the current stability index against its initial potential max.
+        const normalizedIndex = Math.min(1, Math.max(0, netWorthIndex / (maxNetWorthIndex || 1)));
+        
+        // Dynamic range: Base threshold of 50 chars + up to 50 more based on stability.
+        const dynamicThreshold = 50 + (normalizedIndex * 50);
+        
+        return Math.floor(dynamicThreshold);
+    }
+}
+
+
+class AIOrchestrator {
+    constructor(prompt, options) {
+        this.initialPrompt = prompt;
+        this.options = options;
+        this.taskId = crypto.createHash('sha256').update(Date.now().toString()).digest('hex').substring(0, 16);
+        this.proofTracker = new ProofTracker(prompt);
+    }
+
+    runOllama(model, currentPrompt, temperature) {
+        return new Promise((resolve, reject) => {
+            // Note: Ollama CLI doesn't easily support dynamic temperature via 'run' command line args.
+            // For production, this should be replaced with the Ollama REST API call.
+            console.log(`\n\x1b[34m[INFO]\x1b[0m Model \x1b[33m'${model}'\x1b[0m is thinking (Temp: ${temperature.toFixed(2)})...`);
+            
+            // Using exec for simplicity, but the temperature parameter is ignored here for now 
+            // due to Ollama CLI limitations. A REST API call is required for full S:I:R control.
+            const child = exec(`${OLLAMA_BIN} run ${model} "${currentPrompt.replace(/"/g, '\\"')}"`);
+            let output = '';
+            
+            child.stdout.on('data', (data) => {
+                process.stdout.write(`\x1b[2m${data}\x1b[0m`);
+                output += data;
+            });
+            child.stderr.on('data', (data) => process.stderr.write(data));
+            child.on('close', (code) => {
+                if (code !== 0) return reject(`Model ${model} exited with code ${code}`);
+                resolve(output.trim());
+            });
         });
     }
 
-    clearLine() {
-        readline.cursorTo(process.stdout, 0);
-        readline.clearLine(process.stdout, 0);
-    }
-    
-    redrawPrompt() {
-        this.rl.prompt(true);
-    }
-
-    /** Clears and redraws the fixed-height dialog history buffer. */
-    _drawDialogHistory() {
-        // 1. Move cursor to the starting line of the history buffer (above prompt)
-        readline.moveCursor(process.stdout, 0, -(this.historyHeight + 1)); 
-
-        // 2. Clear and redraw the reserved area (History Header + historyHeight - 1 lines)
-        for (let i = 0; i < this.historyHeight; i++) {
-            this.clearLine();
-            if (i < this.historyHeight - 1) process.stdout.write('\n');
-        }
-
-        // 3. Move cursor back up to the start of history area
-        readline.moveCursor(process.stdout, 0, -this.historyHeight);
-
-        // 4. Print history entries
-        const displayHistory = this.dialogHistory.slice(-(this.historyHeight - 1));
+    async recursiveConsensus() {
+        let systemPrompt = `SYSTEM PROMPT: You are a world-class software engineer. Your response MUST be ONLY the requested artifact. Use markdown for all code blocks (e.g., \`\`\`python ... \`\`\`). Do not include any conversational text outside of the code blocks or explanations. User Task:\n`;
+        let currentPrompt = systemPrompt + this.initialPrompt;
+        let lastFusedOutput = "";
+        let converged = false;
         
-        // History Header
-        this.clearLine();
-        process.stdout.write('\x1b[40m\x1b[1;37m--- DIALOG HISTORY ---\x1b[0m\n');
-        
-        // History entries
-        displayHistory.forEach(entry => {
-            this.clearLine();
-            process.stdout.write(entry.substring(0, process.stdout.columns - 3) + '\n');
-        });
+        // Use 5 iterations max
+        for (let i = 0; i < 5 && !converged; i++) {
+            const dynamicTemp = this.proofTracker.getDynamicTemperature();
+            const dynamicThreshold = this.proofTracker.getDynamicConvergenceThreshold();
 
-        // 5. Fill remaining space (if history is short)
-        for (let i = displayHistory.length; i < this.historyHeight - 1; i++) {
-            this.clearLine();
-            process.stdout.write('\n');
-        }
-
-        // 6. Move cursor back down to the prompt line
-        readline.cursorTo(process.stdout, 0);
-        this.redrawPrompt();
-    }
-
-    /** Adds a complete, formatted entry to history and triggers a redraw. */
-    addHistoryEntry(entry) {
-        // Remove existing color codes before pushing to history to keep the display clean
-        const cleanEntry = entry.replace(/\x1b\[[0-9;]*m/g, ''); 
-        this.dialogHistory.push(cleanEntry);
-        if (this.dialogHistory.length > 50) this.dialogHistory.shift(); 
-        this._drawDialogHistory();
-    }
-
-    /** Moves the cursor to the dashboard region. */
-    moveToDashboard() {
-        readline.cursorTo(process.stdout, 0);
-        // Move up past the History Buffer and the Dashboard lines
-        readline.moveCursor(process.stdout, 0, -(this.historyHeight + 1 + this.dashboardLines)); 
-    }
-
-    /** Moves the cursor back down past the dashboard region to the stream area. */
-    movePastDashboard() {
-        readline.moveCursor(process.stdout, 0, this.dashboardLines);
-        readline.cursorTo(process.stdout, 0);
-    }
-
-    /**
-     * Writes streaming output safely (used for Batch and real-time Dialog tokens).
-     * This handles the constant cursor adjustment needed for concurrent scrolling output.
-     * @param {string} data - The content to write.
-     * @param {boolean} isNewline - Whether this write concludes the line.
-     */
-    writeStream(data, isNewline = false) {
-        // Clear the prompt line
-        this.clearLine();
-        
-        // Move up past the history buffer and print the new stream data
-        readline.moveCursor(process.stdout, 0, -(this.historyHeight + 1));
-        process.stdout.write(data);
-        if (isNewline) process.stdout.write('\n');
-
-        // Move back down to the prompt line
-        this._drawDialogHistory(); 
-    }
-}
-
-// --- MOCK STREAMING BACKEND ---
-
-/**
- * Simulates a token-by-token streaming response from a model using the TM.
- * @returns {string} The full response (UNCOLORED) for history logging.
- */
-async function streamBackendResponse(model, prompt, prefix = '', tm) {
-    // Enhanced mock response string to demonstrate token coloring
-    const response = `(MOCK:${model}) Analyzing: ${prompt.substring(0, 20)}... The code model suggests const variable 'X_MAX' = 10; return X_MAX; The string is "Processed".`;
-    
-    // Split on whitespace OR punctuation OR quote marks to isolate tokens for coloring
-    const tokens = response.split(/(\s+|["']|[\(\)\{\}\[\]\.,;:\<\>\=\+\-\*\/%])/).filter(t => t.length > 0);
-    let fullResponse = '';
-
-    tm.writeStream(prefix);
-
-    for (const token of tokens) {
-        // Apply coloring to the token for display
-        const coloredToken = colorToken(token); 
-        tm.writeStream(coloredToken, false);
-        fullResponse += token;
-        await new Promise(r => setTimeout(r, 10 + Math.random() * 5));
-    }
-    
-    tm.writeStream('', true); 
-    return fullResponse;
-}
-
-// --- META-CONSENSUS BATCH ENGINE ---
-
-class MetaConsensusEngine {
-    constructor(files, maxIter, tm) {
-        this.files = files;
-        this.maxIterations = maxIter;
-        this.tm = tm;
-        this.states = {};
-        this.fusedOutput = '';
-        this.lastSignature = '';
-        this.currentIter = 0;
-        this.isComplete = false;
-        this.dashboardLines = files.length + 3;
-        files.forEach(f => this.initState(f));
-    }
-
-    initState(f) {
-        this.states[f] = { progress: 0, entropy: Math.random() * 100, influence: 0.6 + Math.random() * 0.4, output: '', model: assignModel(f) };
-    }
-
-    updateState(f) {
-        const s = this.states[f];
-        s.progress = Math.min(1, s.progress + 0.05 + Math.random() * 0.05);
-        s.entropy = Math.max(0, s.entropy - (s.influence * 15 * Math.random() * 0.1));
-        s.influence = Math.min(1, s.influence + (Math.random() - 0.4) * 0.005);
-    }
-
-    /** * NEW: Provides a structured, human-readable summary of a single file's state.
-     */
-    queryState(filePath) {
-        if (this.files.includes(filePath)) {
-            const s = this.states[filePath];
-            const fileBase = path.basename(filePath);
+            const promises = MODEL_POOL.map(model => 
+                this.runOllama(model, currentPrompt, dynamicTemp).catch(e => {
+                    console.error(`\x1b[31m[ERROR]\x1b[0m ${e}`);
+                    return ""; 
+                })
+            );
+            const results = await Promise.all(promises);
+            const validResults = results.filter(r => typeof r === 'string' && r.length > 0);
             
-            const summary = [
-                `Current State for \x1b[1;36m${fileBase}\x1b[0m (Iteration ${this.currentIter}):`,
-                `  \x1b[32mModel:\x1b[0m ${s.model.toUpperCase()}`,
-                `  \x1b[32mProgress:\x1b[0m ${(s.progress * 100).toFixed(1)}%`,
-                `  \x1b[32mEntropy:\x1b[0m ${s.entropy.toFixed(2)} (High value suggests disagreement)`,
-                `  \x1b[32mInfluence:\x1b[0m ${(s.influence * 100).toFixed(1)}% (Weight in final fusion)`,
-                `  \x1b[32mLast Output Snippet:\x1b[0m ${s.output.substring(0, 50).replace(/\n/g, ' ')}...`
-            ];
-            return summary.join('\n');
-        } else {
-            return `\x1b[31m[ERROR]\x1b[0m File \x1b[36m${filePath}\x1b[0m not found in batch list. Current files are: [${this.files.map(f => path.basename(f)).join(', ')}]`;
-        }
-    }
-
-    /** Draws the dashboard safely at the top of the terminal. */
-    _drawDashboard(converged = false) {
-        this.tm.moveToDashboard();
-        
-        const status = this.isComplete ? 'COMPLETE' : (converged ? 'CONVERGED' : 'RUNNING'),
-              color = this.isComplete ? '\x1b[47m\x1b[30m' : (converged ? '\x1b[42m' : '\x1b[44m');
-
-        let out = `${color}| META-CONSENSUS DASHBOARD | ITER:${this.currentIter}/${this.maxIterations} STATUS:${status} | Sig:${this.lastSignature.substring(0, 10)}...\x1b[0m\n`;
-        out += '|--------------------------------------------------------------------------------\n';
-
-        for (const f of this.files) {
-            const s = this.states[f];
-            const c = getLabelColor(f), base = path.basename(f).padEnd(20), mod = s.model.toUpperCase().padEnd(6);
-            const p = (s.progress * 100).toFixed(0).padStart(3);
-            const ebar = '█'.repeat(Math.floor(s.entropy / 10)).padEnd(10);
-            const ibar = '▒'.repeat(Math.floor(s.influence * 10)).padEnd(10);
-
-            out += `| ${c}${base}\x1b[0m (${mod}) | PROG:${p}% | ENT:[\x1b[33m${ebar}\x1b[0m] | INF:[\x1b[35m${ibar}\x1b[0m]\n`;
-        }
-        out += '|--------------------------------------------------------------------------------';
-
-        // Write line by line directly to the reserved top area
-        const lines = out.split('\n');
-        for (let i = 0; i < this.dashboardLines; i++) {
-            readline.cursorTo(process.stdout, 0);
-            readline.clearLine(process.stdout, 0);
-            if (i < lines.length) process.stdout.write(lines[i]);
-            if (i < this.dashboardLines - 1) process.stdout.write('\n');
-        }
-
-        // Return cursor control to the main stream area
-        this.tm.movePastDashboard();
-    }
-
-    fuseOutputs() {
-        const out = this.files.map(f => Array(Math.max(1, Math.floor(this.states[f].influence * 3))).fill(this.states[f].output).join('\n'));
-        this.fusedOutput = out.join('\n--- FUSED ---\n').trim();
-    }
-
-    getSignature(o) { return o.substring(0, 100); }
-
-    async processFile(f, prevFusion) {
-        const s = this.states[f], model = s.model, prompt = `[${model}] Analyze ${f} entropy:${s.entropy.toFixed(1)} prevFusion:${prevFusion.substring(0, 30)}...`;
-        
-        const prefix = `${getLabelColor(f)}[R${this.currentIter}|${path.basename(f)}]\x1b[0m > `;
-
-        this.tm.writeStream(`\n\x1b[90m--- Batch Processing ${path.basename(f)} ---\x1b[0m\n`, true);
-
-        for (let i = 0; i < 3; i++) {
-            this.updateState(f);
-            await new Promise(r => setTimeout(r, 10)); 
-
-            // Stream batch tokens using the TM
-            await streamBackendResponse(model, prompt, prefix, this.tm);
-            s.output += `(Batch-Token-${i}) `;
-        }
-        this.tm.writeStream(`\x1b[90m--- End ${path.basename(f)} ---\x1b[0m\n`, true);
-    }
-
-    /** Main loop, runs as a continuous non-blocking process. */
-    async run() {
-        // Continuous dashboard update loop 
-        const dashboardLoop = setInterval(() => {
-            this._drawDashboard(this.lastSignature.length > 0 && !this.isComplete);
-        }, 100); 
-
-        for (let iter = 1; iter <= this.maxIterations; iter++) {
-            this.currentIter = iter;
-            this.tm.writeStream(`\n\x1b[1;37m--- META ITERATION ${iter} STARTED ---\x1b[0m\n`, true);
+            if (validResults.length === 0) return "Error: All models failed to respond.";
             
-            const prevFusion = this.fusedOutput;
+            // Fusion logic: simple concatenation for proof of work
+            const fusedOutput = validResults.join('\n---\n').trim();
+            
+            // Check for convergence using the dynamic threshold
+            const lastPrefix = lastFusedOutput.substring(0, dynamicThreshold);
+            const currentPrefix = fusedOutput.substring(0, dynamicThreshold);
 
-            // Process all files concurrently
-            await Promise.all(this.files.map(f => this.processFile(f, prevFusion)));
-
-            this.fuseOutputs();
-            const sig = this.getSignature(this.fusedOutput);
-
-            if (this.lastSignature && sig === this.lastSignature) {
-                this.isComplete = true;
-                this.tm.writeStream(`\n\x1b[32m[CONVERGED]\x1b[0m Iteration ${iter}\n`, true);
-                break;
-            }
-            this.lastSignature = sig;
-
-            this.tm.writeStream(`\n\x1b[1;32m[FUSED OUTPUT Sig:${sig.substring(0, 10)}...]\x1b[0m\n`, true);
-            this.tm.writeStream(this.fusedOutput.substring(0, 300) + '...\n', true);
-        }
-
-        // Cleanup
-        clearInterval(dashboardLoop);
-        this.isComplete = true;
-        this._drawDashboard(true);
-        this.tm.writeStream(`\n\x1b[1;36m[Consensus Complete]\x1b[0m Max iterations reached.\n`, true);
-    }
-}
-
-// --- HYBRID MODE ORCHESTRATOR ---
-
-async function startHybridMode(files, models, iterations) {
-    const filePaths = Object.keys(MOCK_FILE_CONTENTS);
-    const dashboardLines = filePaths.length + 3;
-    const tm = new TerminalManager(dashboardLines);
-
-    // Reserve space for all fixed elements (Dashboard + History + Prompt)
-    for (let i = 0; i < dashboardLines + tm.historyHeight + 1; i++) {
-        process.stdout.write('\n');
-    }
-    tm._drawDialogHistory(); // Draw initial empty history buffer
-    tm.redrawPrompt();
-
-    const engine = new MetaConsensusEngine(filePaths, iterations, tm);
-
-    // 1. Start batch process in background
-    const batchPromise = engine.run();
-
-    // 2. Setup REPL interaction
-    tm.rl.on('line', async (line) => {
-        const prompt = line.trim();
-        const parts = prompt.split(' ');
-        const command = parts[0].toUpperCase();
-        
-        if (prompt.toLowerCase() === 'exit') {
-            tm.rl.close();
-            return;
-        }
-        if (!prompt) {
-            tm.redrawPrompt();
-            return;
-        }
-
-        // --- NEW: Handle Internal QUERY Command ---
-        if (command === 'QUERY') {
-            const filePath = parts[1];
-            if (!filePath) {
-                 const error = `\x1b[31m[ERROR]\x1b[0m Usage: QUERY <filename>. Available files: [${Object.keys(MOCK_FILE_CONTENTS).join(', ')}]`;
-                 tm.addHistoryEntry(error);
+            if (lastPrefix === currentPrefix && i > 0) {
+                converged = true;
+                this.proofTracker.proofCycle(true);
             } else {
-                tm.addHistoryEntry(`\x1b[1;33mYou:\x1b[0m QUERY ${filePath}`);
-                const result = engine.queryState(filePath);
-                tm.writeStream('\n\x1b[1;37m--- ENGINE STATE QUERY ---\x1b[0m\n', true);
-                tm.writeStream(result + '\n', true);
-                tm.addHistoryEntry(result);
+                this.proofTracker.proofCycle(false);
             }
-            tm.redrawPrompt();
-            return;
+            
+            this.proofTracker.crosslineEntropy(fusedOutput);
+
+            lastFusedOutput = fusedOutput;
+            currentPrompt = systemPrompt + this.initialPrompt + `\n\n[PREVIOUS ITERATION OUTPUT]\n${fusedOutput}`;
+            this.logEvent('CONSENSUS_LOOP', `Iteration ${i + 1}, Converged: ${converged}, Temp: ${dynamicTemp.toFixed(2)}, Threshold: ${dynamicThreshold}`);
         }
-        // --- END QUERY Command ---
+        return lastFusedOutput;
+    }
 
-        
-        // Log the user's query to history
-        tm.addHistoryEntry(`\x1b[1;33mYou:\x1b[0m ${prompt}`);
-
-        if (engine.isComplete) {
-            tm.writeStream('\n\x1b[33m[WARN]\x1b[0m Batch process is complete. Dialog fusion ended.\n', true);
-            return;
-        }
-
-        tm.writeStream(`\n\x1b[1;37m--- INTERACTIVE QUERY ---\x1b[0m\n`, true);
-        
-        const responses = {};
-
-        // Stream models concurrently
-        await Promise.all(models.map(async model => {
-            const prefix = `${getLabelColor(model)}[DIALOG|${model}]\x1b[0m > `;
-            const fullResponse = await streamBackendResponse(model, prompt, prefix, tm);
-            responses[model] = fullResponse;
+    parseCodeBlocks(content) {
+        return [...content.matchAll(/```(\w+)\s*([\s\S]*?)```/g)].map(match => ({
+            language: match[1].toLowerCase(),
+            code: match[2].trim(),
         }));
+    }
 
-        tm.writeStream(`\x1b[1;37m--- END QUERY ---\x1b[0m\n`, true);
+    async handleCodeGeneration(content) {
+        const blocks = this.parseCodeBlocks(content);
+        if (blocks.length === 0) return;
+        
+        const projectName = this.options.project || `task_${this.taskId.substring(0, 8)}`;
+        const projectPath = path.join(PROJECTS_DIR, projectName);
+        fs.mkdirSync(projectPath, { recursive: true });
 
-        // Add all completed model responses to the fixed history buffer
-        Object.entries(responses).forEach(([model, response]) => {
-            const formattedEntry = `${getLabelColor(model)}[${model}]:\x1b[0m ${response}`;
-            tm.addHistoryEntry(formattedEntry);
+        for (const [i, block] of blocks.entries()) {
+            const ext = this.getFileExtension(block.language);
+            const fileName = `${block.language}_${i}.${ext}`;
+            const filePath = path.join(projectPath, fileName);
+            fs.writeFileSync(filePath, block.code);
+            this.saveBlob(projectName, filePath, block.code);
+            console.log(`\x1b[32m[SUCCESS]\x1b[0m Generated file: ${filePath}`);
+        }
+        this.gitCommit(projectName);
+    }
+    
+    getFileExtension(lang) { return ({ python: 'py', javascript: 'js', html: 'html', css: 'css', php: 'php', sql: 'sql', bash: 'sh', go: 'go', markdown: 'md' })[lang] || 'txt'; }
+    
+    saveMemory(prompt, response) {
+        const proofState = JSON.stringify(this.proofTracker.getState());
+        aiDataDb.run("INSERT INTO memories (task_id, prompt, response, proof_state) VALUES (?, ?, ?, ?)", [this.taskId, prompt, response, proofState], (err) => {
+            if (err) console.error("Database Error (Memory):", err.message);
         });
+    }
 
-        tm.redrawPrompt();
-    });
+    saveBlob(proj, file, content) { 
+        blobsDb.run("INSERT INTO blobs (project_name, file_path, content) VALUES (?, ?, ?)", [proj, path.basename(file), content], (err) => {
+            if (err) console.error("Database Error (Blob):", err.message);
+        });
+    }
+    
+    logEvent(type, msg) { 
+        aiDataDb.run("INSERT INTO events (event_type, message) VALUES (?, ?)", [type, msg], (err) => {
+             if (err) console.error("Database Error (Event):", err.message);
+        });
+    }
 
-    tm.rl.on('close', () => {
-        tm.clearLine();
-        console.log('\n\x1b[1;36m[CLI Session]\x1b[0m Ended.');
-        process.exit(0);
-    });
+    gitCommit(projectName) {
+        exec(`git -C ${AI_HOME} add . && git -C ${AI_HOME} commit -m "feat: AI project ${projectName}"`, (err, stdout, stderr) => {
+            if (err) this.logEvent('GIT_ERROR', `Failed to commit ${projectName}: ${stderr}`);
+            else this.logEvent('GIT_SUCCESS', `Committed project ${projectName}`);
+        });
+    }
 
-    // Wait for the batch process to finish
-    await batchPromise;
-}
-
-// --- CLI ENTRY POINT ---
-
-function printUsage() {
-    console.log(`\n\x1b[1;37mUsage:\x1b[0m`);
-    console.log(`  \x1b[1;36mnode cli.js hybrid [flags]\x1b[0m  - Runs batch consensus and interactive dialog concurrently.`);
-    console.log(`\n\x1b[1;37mCommands (in Dialog):\x1b[0m`);
-    console.log(`  \x1b[35mQUERY <filename>\x1b[0m - Get real-time status (Progress, Entropy, Influence) of a batch file.`);
-    console.log(`  \x1b[35mexit\x1b[0m             - End the session.`);
-    console.log(`\n\x1b[1;37mFlags (for hybrid mode):\x1b[0m`);
-    console.log(`  \x1b[35m--models=<name1,name2>\x1b[0m Comma-separated list of models for dialog (default: core,loop).`);
-    console.log(`  \x1b[35m--iterations=<N>\x1b[0m     Max convergence iterations for batch (default: 6).`);
-    console.log(`\nExample:`);
-    console.log(`  node cli.js hybrid --models=core,code --iterations=4`);
-}
-
-async function main() {
-    const args = process.argv.slice(2);
-    const cmd = args[0];
-
-    const flags = {};
-    args.slice(1).forEach(a => {
-        if (a.startsWith('--')) {
-            const [k, v] = a.slice(2).split('=');
-            flags[k] = v === undefined ? true : v;
-        }
-    });
-
-    if (cmd === 'hybrid') {
-        const models = flags.models ? flags.models.split(',') : ['core', 'loop'];
-        const iterations = flags.iterations ? parseInt(flags.iterations) : 6;
-
-        if (isNaN(iterations) || iterations <= 0) {
-            console.error(`\x1b[31m[ERROR]\x1b[0m --iterations must be a positive integer.`);
-            return;
-        }
-
-        await startHybridMode(Object.keys(MOCK_FILE_CONTENTS), models, iterations);
-    } else {
-        console.error(`\x1b[31m[ERROR]\x1b[0m Unknown command or mode specified: '${cmd}'`);
-        printUsage();
+    async execute() {
+        this.logEvent('ORCHESTRATION_START', `Task ${this.taskId} started.`);
+        const finalOutput = await this.recursiveConsensus();
+        console.log("\n\x1b[1;36m--- Final Consensus Output ---\x1b[0m\n");
+        console.log(finalOutput);
+        this.saveMemory(this.initialPrompt, finalOutput);
+        await this.handleCodeGeneration(finalOutput);
+        this.logEvent('ORCHESTRATION_END', `Task ${this.taskId} finished.`);
     }
 }
 
-main();
+// --- Main Execution ---
+(async () => {
+    const args = process.argv.slice(2);
+    // Find prompt arguments (not starting with --) and join them
+    const prompt = args.filter(arg => !arg.startsWith('--')).join(' '); 
+    // Parse options (like --project=name)
+    const options = Object.fromEntries(args.filter(arg => arg.startsWith('--')).map(arg => arg.slice(2).split('=')));
+    
+    if (!prompt) {
+        console.error("\x1b[31mError:\x1b[0m No prompt or command provided to orchestrator.");
+        process.exit(1);
+    }
+
+    const orchestrator = new AIOrchestrator(prompt, options);
+    await orchestrator.execute().finally(() => {
+        // Ensure databases are closed after the task completes
+        aiDataDb.close();
+        blobsDb.close();
+    });
+})();
+EOF
+
+    # Write the Python Webserver, Wallet, and Seed Manager
+    cat > "$AI_HOME/manager.py" << 'EOF'
+import http.server, socketserver, json, sqlite3, os, sys, argparse
+
+try:
+    # Requires 'pip install bip-utils'
+    from bip_utils import Bip39SeedGenerator, Bip44, Bip44Coins 
+    BIP_UTILS_AVAILABLE = True
+except ImportError:
+    BIP_UTILS_AVAILABLE = False
+
+AI_HOME = os.path.expanduser("~/.sysop-ai")
+DB_DIR = os.path.join(AI_HOME, "db")
+WALLET_DB_PATH = os.path.join(DB_DIR, "wallet.db")
+
+def setup_wallet_db():
+    os.makedirs(DB_DIR, exist_ok=True)
+    conn = sqlite3.connect(WALLET_DB_PATH)
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS seeds (id INTEGER PRIMARY KEY, mnemonic TEXT UNIQUE)')
+    c.execute('CREATE TABLE IF NOT EXISTS wallets (id INTEGER PRIMARY KEY, name TEXT, coin_type TEXT, address TEXT, private_key TEXT)')
+    conn.commit()
+    conn.close()
+
+def manage_seed(action):
+    if not BIP_UTILS_AVAILABLE:
+        print("Error: 'bip_utils' library not found. Please run 'pip install bip-utils'", file=sys.stderr)
+        return
+    setup_wallet_db()
+    conn = sqlite3.connect(WALLET_DB_PATH)
+    c = conn.cursor()
+    if action == 'generate':
+        # Generate 12 words
+        mnemonic = Bip39SeedGenerator.FromWordsNumber(12).Generate()
+        try:
+            c.execute("INSERT INTO seeds (mnemonic) VALUES (?)", (mnemonic,))
+            conn.commit()
+            print(f"Generated and saved new seed: {mnemonic}")
+        except sqlite3.IntegrityError:
+            print("Generated a duplicate seed, which is highly unlikely. Try again.")
+    elif action == 'list':
+        print("\n--- Stored Seeds ---")
+        for row in c.execute("SELECT id, mnemonic FROM seeds"):
+            print(f"ID {row[0]}: {row[1]}")
+        print("--------------------\n")
+    conn.close()
+
+def manage_wallet(action, name="default"):
+    # Wallet management logic would go here
+    print(f"Wallet action '{action}' for wallet '{name}' is not fully implemented yet.")
+
+class APIHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({"status": "SysOp-AI Server is running"}).encode())
+
+def run_server():
+    PORT = 8000
+    with socketserver.TCPServer(("", PORT), APIHandler) as httpd:
+        print(f"Serving at http://localhost:{PORT}")
+        httpd.serve_forever()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="SysOp-AI Manager")
+    subparsers = parser.add_subparsers(dest='command')
+    
+    server_parser = subparsers.add_parser('server', help='Run the web server')
+    
+    seed_parser = subparsers.add_parser('seed', help='Manage seed phrases')
+    seed_parser.add_argument('action', choices=['generate', 'list'])
+    
+    wallet_parser = subparsers.add_parser('wallet', help='Manage wallets')
+    wallet_parser.add_argument('action', choices=['create', 'list'])
+    wallet_parser.add_argument('--name', default='default')
+    
+    args = parser.parse_args()
+    
+    if args.command == 'server':
+        run_server()
+    elif args.command == 'seed':
+        manage_seed(args.action)
+    elif args.command == 'wallet':
+        manage_wallet(args.action, args.name)
+EOF
+
+    # Initialize Databases
+    sqlite3 "$AI_DATA_DB" "CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, task_id TEXT, prompt TEXT, response TEXT, proof_state TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
+    sqlite3 "$AI_DATA_DB" "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, event_type TEXT, message TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
+    sqlite3 "$BLOBS_DB" "CREATE TABLE IF NOT EXISTS blobs (id INTEGER PRIMARY KEY, project_name TEXT, file_path TEXT, content BLOB, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
+    
+    # Initialize Git Repo
+    if [ ! -d "$AI_HOME/.git" ]; then
+        git init -b devel "$AI_HOME" &>/dev/null
+        log_event "INFO" "Initialized Git repository in $AI_HOME"
+    fi
+}
+
+# Log an event to console and DB
+log_event() {
+    echo "[\x1b[34m$1\x1b[0m] $(date): $2"
+    sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$1', '$2');"
+}
+
+# Display help message
+show_help() {
+    echo "SysOp-AI: A self-contained AI orchestration framework."
+    echo ""
+    echo "USAGE:"
+    echo "  ai <prompt> [flags]   (Default: runs the prompt as a task)"
+    echo "  ai [COMMAND] [ARGUMENTS]"
+    echo ""
+    echo "DEFAULT BEHAVIOR:"
+    echo "  If arguments are provided and not a command, runs as an AI task."
+    echo "  If no arguments are provided, shows environment status."
+    echo ""
+    echo "COMMANDS:"
+    echo "  run <prompt>        Run an AI task loop with the given prompt."
+    echo "  import <url>        Pull external content to provide context for a run."
+    echo "  memories            Show past AI prompts/responses."
+    echo "  events              Show event logs."
+    echo "  blobs               List stored file blobs."
+    echo "  ssh-key [ls|gen]    Manage SSH keys."
+    echo "  seed [generate|list] Manage wallet seed phrases."
+    echo "  wallet [create|list] Manage wallets (not fully implemented)."
+    echo "  server              Start the Python web server (port 8000)."
+    echo "  status              Show environment, tools, and model statuses."
+    echo "  --start             Interactively start a new named project session."
+    echo "  --stop              Stop the current project session."
+    echo "  --help              Show this help message."
+    echo ""
+    echo "FLAGS FOR 'run' (and default prompt):"
+    echo "  --project=<name>    Assign a name to the project for generated files."
+}
+
+# Helper function to run the orchestrator with session check
+run_ai_task() {
+    local prompt="$*"
+    if [ -f "$SESSION_FILE" ]; then
+        local proj_name=$(cat "$SESSION_FILE")
+        prompt="$prompt --project=$proj_name"
+    fi
+    log_event "TASK_START" "Prompt: $prompt"
+    node "$AI_HOME/orchestrator.js" "$prompt"
+    log_event "TASK_END" "Task finished."
+}
+
+# Helper function to show status
+status_check() {
+    echo "SysOp-AI Status"
+    echo "AI_HOME: $AI_HOME"
+    echo "Ollama: $(command -v $OLLAMA_BIN &> /dev/null && echo 'OK' || echo 'Not Found')"
+    echo "SQLite: $(command -v sqlite3 &> /dev/null && echo 'OK' || echo 'Not Found')"
+    echo "NodeJS: $(command -v node &> /dev/null && echo 'OK' || echo 'Not Found')"
+    echo "Python3: $(command -v python3 &> /dev/null && echo 'OK' || echo 'Not Found')"
+    [ -f "$SESSION_FILE" ] && echo "Active Session: $(cat "$SESSION_FILE")" || echo "Active Session: None"
+}
+
+
+# --- Command Functions ---
+
+# Manage SSH Keys
+manage_ssh() {
+    case "$1" in
+        ls) ls -la "$SSH_DIR" ;;
+        gen)
+            read -p "Enter key name (e.g., id_rsa_project): " key_name
+            ssh-keygen -t rsa -b 4096 -f "$SSH_DIR/$key_name"
+            log_event "SSH" "Generated new key: $key_name"
+            ;;
+        *) echo "Usage: ai ssh-key [ls|gen]" ;;
+    esac
+}
+
+
+# --- Main Execution ---
+check_dependencies
+setup_environment
+
+# If no arguments, show status as the default action
+if [ $# -eq 0 ]; then
+    status_check
+    exit 0
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    --start)
+        read -p "Enter project/repo name: " proj_name
+        echo "$proj_name" > "$SESSION_FILE"
+        log_event "SESSION" "Started session for project '$proj_name'"
+        ;;
+    --stop)
+        rm -f "$SESSION_FILE"
+        log_event "SESSION" "Stopped session."
+        ;;
+    run)
+        run_ai_task "$@"
+        ;;
+    import)
+        URL="$1"
+        CONTENT=$(curl -sL "$URL")
+        log_event "IMPORT" "Importing content from $URL"
+        echo "Import complete. Summarizing the content..."
+        run_ai_task "Summarize and analyze the following content: $CONTENT"
+        ;;
+    memories) sqlite3 -header -column "$AI_DATA_DB" "SELECT id, task_id, substr(prompt, 1, 40) as prompt, ts FROM memories ORDER BY ts DESC;" ;;
+    events) sqlite3 -header -column "$AI_DATA_DB" "SELECT * FROM events ORDER BY ts DESC;" ;;
+    blobs) sqlite3 -header -column "$BLOBS_DB" "SELECT id, project_name, file_path, length(content) as size, ts FROM blobs ORDER BY ts DESC;" ;;
+    ssh-key) manage_ssh "$@" ;;
+    seed) python3 "$AI_HOME/manager.py" seed "$@" ;;
+    wallet) python3 "$AI_HOME/manager.py" wallet "$@" ;;
+    server) python3 "$AI_HOME/manager.py" server & ;;
+    status) status_check ;;
+    --help|-h) show_help ;;
+    *) # Default to 'run' if no other command matches
+        # $COMMAND is the first word of the prompt, and $@ is the rest.
+        run_ai_task "$COMMAND $@"
+        ;;
+esac
