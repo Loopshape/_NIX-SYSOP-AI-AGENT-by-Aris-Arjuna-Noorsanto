@@ -62,6 +62,17 @@ check_dependencies() {
     fi
 }
 
+# Helper function to show status
+status_check() {
+    echo "SysOp-AI Status"
+    echo "AI_HOME: $AI_HOME"
+    echo "Ollama: $(command -v $OLLAMA_BIN &> /dev/null && echo 'OK' || echo 'Not Found')"
+    echo "SQLite: $(command -v sqlite3 &> /dev/null && echo 'OK' || echo 'Not Found')"
+    echo "NodeJS: $(command -v node &> /dev/null && echo 'OK' || echo 'Not Found')"
+    echo "Python3: $(command -v python3 &> /dev/null && echo 'OK' || echo 'Not Found')"
+    [ -f "$SESSION_FILE" ] && echo "Active Session: $(cat "$SESSION_FILE")" || echo "Active Session: None"
+}
+
 
 # --- Setup & Orchestrator Content ---
 
@@ -70,7 +81,7 @@ read -r -d '' JS_ORCHESTRATOR_CONTENT <<'EOF_JS'
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import crypto from 'crypto'; // Added crypto for taskId
+import crypto from 'crypto'; 
 
 // Inherit ENV vars from bash script
 const AI_HOME = process.env.AI_HOME;
@@ -195,11 +206,8 @@ async function runPrompt(prompt) {
     const prompt = args.join(' '); 
     
     if (!prompt) {
-        // This case should ideally be caught by the bash script's initial check
         process.exit(0);
     }
-
-    const taskId = crypto.randomBytes(8).toString('hex'); // Placeholder task ID
 
     // Execution starts here
     try {
@@ -325,7 +333,7 @@ log_event() {
     sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$1', '$2');"
 }
 
-# Display help message (omitted for brevity)
+# Display help message
 show_help() {
     echo "SysOp-AI: A self-contained AI orchestration framework."
     echo ""
@@ -339,14 +347,28 @@ show_help() {
     echo ""
     echo "COMMANDS:"
     echo "  run <prompt>        Run an AI task loop with the given prompt."
-    echo "  memories/events/blobs/status/server/ssh-key/seed/wallet"
+    echo "  import <url>        Pull external content to provide context for a run."
+    echo "  memories            Show past AI prompts/responses."
+    echo "  events              Show event logs."
+    echo "  blobs               List stored file blobs."
+    echo "  ssh-key [ls|gen]    Manage SSH keys."
+    echo "  seed [generate|list] Manage wallet seed phrases."
+    echo "  wallet [create|list] Manage wallets (not fully implemented)."
+    echo "  server              Start the Python web server (port 8000)."
+    echo "  status              Show environment, tools, and model statuses."
+    echo "  --start             Interactively start a new named project session."
+    echo "  --stop              Stop the current project session."
+    echo "  --help              Show this help message."
     echo ""
+    echo "FLAGS FOR 'run' (and default prompt):"
+    echo "  --project=<name>    Assign a name to the project for generated files."
 }
+
 
 # Helper function to run the orchestrator with session check
 run_ai_task() {
     local full_prompt="$*"
-    
+
     # 1. Hyphen Check: If prompt contains a hyphen, route directly to Ollama
     if [[ "$full_prompt" == *\-* ]]; then
         echo "[INFO] Prompt contains a hyphen ('$full_prompt'). Bypassing orchestrator and sending directly to Ollama."
@@ -358,26 +380,42 @@ run_ai_task() {
         fi
         return
     fi
-    
+
     # 2. Non-Hyphenated Prompt: Route to Orchestrator (.mjs)
     local prompt="$full_prompt"
-    
+
     # Append project flag if session is active
     if [ -f "$SESSION_FILE" ]; then
         local proj_name=$(cat "$SESSION_FILE")
         prompt="$prompt --project=$proj_name"
     fi
-    
+
     log_event "TASK_START" "Prompt: $prompt"
     # Ensure the orchestrator file exists before running
     if [ ! -f "$ORCHESTRATOR_FILE" ]; then
         log_event "ERROR" "Orchestrator file not found. Run 'ai status' or 'ai setup'."
         return
     fi
-    
+
     # Execute the Node.js orchestrator
     node "$ORCHESTRATOR_FILE" "$prompt"
     log_event "TASK_END" "Task finished."
+}
+
+
+# --- Command Functions ---
+
+# Manage SSH Keys
+manage_ssh() {
+    case "$1" in
+        ls) ls -la "$SSH_DIR" ;;
+        gen)
+            read -p "Enter key name (e.g., id_rsa_project): " key_name
+            ssh-keygen -t rsa -b 4096 -f "$SSH_DIR/$key_name"
+            log_event "SSH" "Generated new key: $key_name"
+            ;;
+        *) echo "Usage: ai ssh-key [ls|gen]" ;;
+    esac
 }
 
 
