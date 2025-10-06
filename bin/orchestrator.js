@@ -1,1 +1,0 @@
-/home/loop/.sysop-ai/orchestrator.js

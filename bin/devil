@@ -1,2 +1,0 @@
-@#!/bin/env bash
-alias angel="pkill ollama && nohup ollama serve && nohup ollama run 2244 &;"
