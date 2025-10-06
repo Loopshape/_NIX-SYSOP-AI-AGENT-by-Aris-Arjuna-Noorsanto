@@ -52,6 +52,14 @@ function logResult(projectName, task, data) {
 }
 
 /**
+ * Print colored summary
+ */
+function printSummary(title, data) {
+  console.log(chalk.yellow(`\n--- ${title} ---`));
+  console.dir(data, { depth: 3, colors: true });
+}
+
+/**
  * Probe environment
  */
 async function probeEnvironment(projectName) {
@@ -99,14 +107,6 @@ function listFiles() {
 }
 
 /**
- * Print colored summary
- */
-function printSummary(title, data) {
-  console.log(chalk.yellow(`\n--- ${title} ---`));
-  console.dir(data, { depth: 3, colors: true });
-}
-
-/**
  * Run setup
  */
 async function runSetup() {
@@ -124,6 +124,10 @@ async function runSetup() {
     console.log(chalk.green('✅ chalk installed'));
   }
 
+  const pluginsDir = path.join(process.cwd(), '.sysop-ai', 'plugins');
+  if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
+  console.log(chalk.green('✅ Plugins folder ready'));
+
   const tools = ['node -v', 'npm -v', 'python3 --version', 'pip3 --version', 'git --version', 'go version', 'gcc --version', 'make --version', 'sqlite3 --version'];
   console.log(chalk.cyan('Checking required tools...'));
   for (const cmd of tools) {
@@ -135,29 +139,38 @@ async function runSetup() {
 }
 
 /**
- * Self-update
+ * Run update
  */
 async function runUpdate() {
   console.log(chalk.cyanBright('Updating AI CLI...'));
-
-  // 1. Pull latest code if this is a Git repo
   if (fs.existsSync('.git')) {
-    console.log(chalk.cyan('Pulling latest code from Git...'));
     const gitPull = await runCommand('git pull');
     console.log(gitPull.stdout || gitPull.stderr);
   } else {
-    console.log(chalk.yellow('⚠ Not a Git repository, skipping git pull.'));
+    console.log(chalk.yellow('⚠ Not a Git repo, skipping git pull.'));
   }
-
-  // 2. Update chalk
-  console.log(chalk.cyan('Ensuring chalk is up-to-date...'));
   await runCommand('npm install chalk@latest');
-  console.log(chalk.green('✅ chalk updated'));
-
-  // 3. Re-run setup
   await runSetup();
-
   console.log(chalk.cyanBright('Update complete!'));
+}
+
+/**
+ * Run plugin dynamically
+ */
+async function runPlugin(taskPrompt, args) {
+  const pluginsDir = path.join(process.cwd(), '.sysop-ai', 'plugins');
+  if (!fs.existsSync(pluginsDir)) return null;
+
+  const pluginFiles = fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js'));
+  for (const file of pluginFiles) {
+    const pluginPath = path.join(pluginsDir, file);
+    const pluginName = path.basename(file, '.js').toLowerCase();
+    if (taskPrompt.startsWith(pluginName)) {
+      const module = await import(`file://${pluginPath}`);
+      return module.default(args);
+    }
+  }
+  return null;
 }
 
 /**
@@ -179,8 +192,10 @@ async function runOrchestrator() {
   }
 
   console.log(chalk.cyanBright(`AI Task: ${taskPrompt}`));
-  let result;
 
+  let result = null;
+
+  // Built-in tasks
   if (taskPrompt.includes('scan env')) {
     result = await probeEnvironment(projectName);
     printSummary('Environment Summary', result);
@@ -195,8 +210,14 @@ async function runOrchestrator() {
     result = listFiles();
     printSummary('Files in Directory', result);
   } else {
-    result = { message: `Prompt "${taskPrompt}" not recognized. Try: setup, update, scan env, analyze dependencies, check python packages, list files.` };
-    printSummary('AI Response', result);
+    // Dynamic plugins
+    result = await runPlugin(taskPrompt, args);
+    if (result) {
+      printSummary('Plugin Result', result);
+    } else {
+      result = { message: `Prompt "${taskPrompt}" not recognized and no plugin found.` };
+      printSummary('AI Response', result);
+    }
   }
 
   if (!['setup', 'update'].includes(taskPrompt)) {
