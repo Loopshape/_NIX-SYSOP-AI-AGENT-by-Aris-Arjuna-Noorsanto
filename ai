@@ -1,84 +1,99 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ███████╗██╗   ██╗███████╗ ██████╗ ██████╗ █████╗ ██╗
-# ██╔════╝╚██╗ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║
-# ███████╗ ╚████╔╝ █████╗  ██║   ██║██████╔╝███████║██║
-# ╚════██║  ╚██╔╝  ██╔══╝  ██║   ██║██╔═══╝ ██╔══██║██║
-# ███████║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗
-# ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝
-#
-# A self-contained AI orchestration framework for local LLMs.
-# Version: 3.0.0 (Multi-Model Consensus & Code Persistence)
-
-# --- Environment & Configuration ---
+# ───────────────────────────────
+# NIX-SYSOP-AI-AGENT Full Bash Orchestrator
+# ───────────────────────────────
 export AI_HOME="${AI_HOME:-$HOME/.sysop-ai}"
-export ENV_HOME="${ENV_HOME:-$HOME/.sysop_ai_env}"
 export NODE_MODULES="$AI_HOME/node_modules"
-export PLUGIN_DIR="$AI_HOME/plugins"
-export LOG_DIR="$AI_HOME/ollama_logs"
-export REGISTRY_FILE="$AI_HOME/pattern_registry.json" # Kept for future pattern integration
-export SUGGESTION_FILE="$AI_HOME/pattern_suggestions.json"
-export HISTORY_FILE="$AI_HOME/prompt_history.json"
-export ORCHESTRATOR_FILE="$AI_HOME/orchestrator.mjs" # Updated to .mjs for ES modules
-
-export TASKS_DIR="$AI_HOME/tasks"
+export ORCHESTRATOR_FILE="$AI_HOME/orchestrator.mjs"
 export PROJECTS_DIR="$AI_HOME/projects"
+export TASKS_DIR="$AI_HOME/tasks"
 export DB_DIR="$AI_HOME/db"
-export SSH_DIR="$AI_HOME/ssh"
-export AI_DATA_DB="$DB_DIR/ai_data.db" # Database for memories and events
-export BLOBS_DB="$DB_DIR/blobs.db"     # Database for file content storage
-export WALLET_DB="$DB_DIR/wallet.db"
+export LOG_DIR="$AI_HOME/logs"
 export SESSION_FILE="$AI_HOME/.session"
 export OLLAMA_BIN="ollama"
-export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES" # Node Path for module resolution
 
-# --- Node Self-Healing & Dependency Checks ---
+mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$TASKS_DIR" "$DB_DIR" "$LOG_DIR"
 
-# Check for Node module 'sqlite3' and install if missing (non-repetitive)
-check_node_modules() {
-    if [ ! -d "$NODE_MODULES/sqlite3" ]; then
-        echo "[INFO] Node module 'sqlite3' missing. Installing locally to $AI_HOME..."
-        npm install --prefix "$AI_HOME" sqlite3
-    fi
+log_event() {
+    echo -e "[\033[34m$1\033[0m] $(date): $2"
+    sqlite3 "$DB_DIR/ai_data.db" "INSERT INTO events (event_type, message) VALUES ('$1', '$2');" || true
 }
 
-# Check all required dependencies
+status_check() {
+    echo "AI_HOME: $AI_HOME"
+    echo "Ollama: $(command -v $OLLAMA_BIN &>/dev/null && echo OK || echo Not Found)"
+    echo "NodeJS: $(command -v node &>/dev/null && echo OK || echo Not Found)"
+    echo "SQLite: $(command -v sqlite3 &>/dev/null && echo OK || echo Not Found)"
+    [ -f "$SESSION_FILE" ] && echo "Active Session: $(cat "$SESSION_FILE")" || echo "Active Session: None"
+}
+
 check_dependencies() {
-    local missing_deps=()
-    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    local deps=("node" "npm" "sqlite3" "$OLLAMA_BIN")
+    local missing=()
     for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            missing_deps+=("$dep")
-        fi
+        command -v "$dep" >/dev/null 2>&1 || missing+=("$dep")
     done
-    
-    # Run Node module check, but don't fail if it's slow
-    check_node_modules
-    
-    if [ ${#missing_deps[@]} -ne 0 ]; then
-        echo "Error: Missing required CLI dependencies: ${missing_deps[*]}. Please install them and try again."
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "Missing dependencies: ${missing[*]}"
         exit 1
     fi
 }
 
-# Helper function to show status
-status_check() {
-    echo "SysOp-AI Status (Consensus Engine)"
-    echo "AI_HOME: $AI_HOME"
-    echo "Ollama: $(command -v $OLLAMA_BIN &> /dev/null && echo 'OK' || echo 'Not Found')"
-    echo "SQLite: $(command -v sqlite3 &> /dev/null && echo 'OK' || echo 'Not Found')"
-    echo "NodeJS: $(command -v node &> /dev/null && echo 'OK' || echo 'Not Found')"
-    echo "Python3: $(command -v python3 &> /dev/null && echo 'OK' || echo 'Not Found')"
-    [ -f "$SESSION_FILE" ] && echo "Active Session: $(cat "$SESSION_FILE")" || echo "Active Session: None"
-    echo "Consensus Models: phi3, llama3, codegemma (Ensure they are pulled)"
+setup_node_modules() {
+    if [ ! -d "$NODE_MODULES" ]; then
+        log_event "INFO" "Installing Node dependencies..."
+        npm install --prefix "$AI_HOME"
+    fi
 }
 
+start_session() {
+    local proj_name="$1"
+    echo "$proj_name" > "$SESSION_FILE"
+    log_event "SESSION" "Started session: $proj_name"
+}
 
-# --- Setup & Orchestrator Content ---
+stop_session() {
+    rm -f "$SESSION_FILE"
+    log_event "SESSION" "Stopped session."
+}
 
-# The full, multi-model consensus orchestrator (fused with environment variables)
-read -r -d '' JS_ORCHESTRATOR_CONTENT <<'EOF_JS'
+run_ai_task() {
+    local prompt="$*"
+    if [[ "$prompt" == *-* ]]; then
+        log_event "TASK" "Running direct Ollama task: $prompt"
+        "$OLLAMA_BIN" run llama3 "$prompt"
+        return
+    fi
+    [ -f "$SESSION_FILE" ] && prompt="$prompt --project=$(cat $SESSION_FILE)"
+    log_event "TASK_START" "$prompt"
+
+    if [ ! -f "$ORCHESTRATOR_FILE" ]; then
+        log_event "ERROR" "Orchestrator file missing: $ORCHESTRATOR_FILE"
+        return
+    fi
+
+    node "$ORCHESTRATOR_FILE" $prompt
+    log_event "TASK_END" "$prompt"
+}
+
+manage_ssh() {
+    mkdir -p "$AI_HOME/ssh"
+    case "$1" in
+        ls) ls -la "$AI_HOME/ssh" ;;
+        gen)
+            read -p "Key name: " key_name
+            ssh-keygen -t rsa -b 4096 -f "$AI_HOME/ssh/$key_name"
+            log_event "SSH" "Generated key: $key_name"
+            ;;
+        *) echo "Usage: ai ssh-key [ls|gen]" ;;
+    esac
+}
+
+setup_orchestrator() {
+mkdir -p "$AI_HOME"
+cat > "$ORCHESTRATOR_FILE" <<'EOF'
 // orchestrator.mjs
 import { exec } from 'child_process';
 import crypto from 'crypto';
@@ -88,52 +103,33 @@ import sqlite3Pkg from 'sqlite3';
 const { verbose } = sqlite3Pkg;
 const sqlite3 = verbose();
 
-// Inherit ENV vars from bash script
 const AI_HOME = process.env.AI_HOME;
 const PROJECTS_DIR = process.env.PROJECTS_DIR;
-const AI_DATA_DB_PATH = process.env.AI_DATA_DB;
-const BLOBS_DB_PATH = process.env.BLOBS_DB;
+const DB_DIR = process.env.DB_DIR;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
+const MODEL_POOL = ["core", "loop", "code"];
+const aiDataDb = new sqlite3.Database(path.join(DB_DIR, "ai_data.db"));
+const blobsDb = new sqlite3.Database(path.join(DB_DIR, "blobs.db"));
 
-// Models used for multi-model consensus
-const MODEL_POOL = ["phi3", "llama3", "codegemma"];
-
-// Database connections are opened once globally
-const aiDataDb = new sqlite3.Database(AI_DATA_DB_PATH);
-const blobsDb = new sqlite3.Database(BLOBS_DB_PATH);
-
-/**
- * ProofTracker implements a simple state machine to log task complexity and convergence.
- */
 class ProofTracker {
     constructor(initialPrompt) {
         this.cycleIndex = initialPrompt.length;
         this.netWorthIndex = (this.cycleIndex % 128) << 2;
         this.entropyRatio = (this.cycleIndex ^ Date.now()) / 1000;
     }
-
     crosslineEntropy(data) {
         const hash = crypto.createHash('sha256').update(data).digest('hex');
         this.entropyRatio += parseInt(hash.substring(0, 8), 16);
     }
-
     proofCycle(converged) {
         this.cycleIndex += converged ? 1 : 0;
         this.netWorthIndex -= converged ? 0 : 1;
     }
-
     getState() {
-        return {
-            cycleIndex: this.cycleIndex,
-            netWorthIndex: this.netWorthIndex,
-            entropyRatio: this.entropyRatio
-        };
+        return { cycleIndex: this.cycleIndex, netWorthIndex: this.netWorthIndex, entropyRatio: this.entropyRatio };
     }
 }
 
-/**
- * The core orchestrator managing multi-model execution and data persistence.
- */
 class AIOrchestrator {
     constructor(prompt, options) {
         this.initialPrompt = prompt;
@@ -141,435 +137,108 @@ class AIOrchestrator {
         this.taskId = crypto.createHash('sha256').update(Date.now().toString()).digest('hex');
         this.proofTracker = new ProofTracker(prompt);
     }
-
-    /**
-     * Executes a single Ollama model asynchronously.
-     */
     runOllama(model, currentPrompt) {
         return new Promise((resolve, reject) => {
             console.log(`\n\x1b[34m[INFO]\x1b[0m Model \x1b[33m'${model}'\x1b[0m is thinking...`);
-            // Use exec for synchronous shell output streaming
             const child = exec(`${OLLAMA_BIN} run ${model} "${currentPrompt.replace(/"/g, '\\"')}"`);
             let output = '';
-            
-            // Stream output to console while capturing for consensus
-            child.stdout.on('data', data => {
-                process.stdout.write(`\x1b[2m${data}\x1b[0m`);
-                output += data;
-            });
+            child.stdout.on('data', data => { process.stdout.write(`\x1b[2m${data}\x1b[0m`); output += data; });
             child.stderr.on('data', data => process.stderr.write(data));
-            
-            child.on('close', code => {
-                if (code !== 0) return reject(`Model ${model} exited with code ${code}`);
-                resolve(output.trim());
-            });
+            child.on('close', code => { if (code!==0) return reject(`Model ${model} exited with code ${code}`); resolve(output.trim()); });
         });
     }
-
-    /**
-     * Runs three consensus loops, prompting all models and feeding the fused output back.
-     */
     async recursiveConsensus() {
-        let systemPrompt = `SYSTEM PROMPT: You are a world-class software engineer. Your response MUST be ONLY the requested artifact. Use markdown for all code blocks (e.g., \`\`\`python ... \`\`\`). Do not include any conversational text outside of the code blocks or explanations. User Task:\n`;
+        let systemPrompt = `SYSTEM PROMPT: You are a world-class software engineer. Only return requested artifacts.\nUser Task:\n`;
         let currentPrompt = systemPrompt + this.initialPrompt;
         let lastFusedOutput = "";
         let converged = false;
-
-        for (let i = 0; i < 3 && !converged; i++) {
-            const promises = MODEL_POOL.map(model => this.runOllama(model, currentPrompt).catch(e => e));
+        for (let i=0;i<3 && !converged;i++) {
+            const promises = MODEL_POOL.map(m=>this.runOllama(m,currentPrompt).catch(e=>e));
             const results = await Promise.all(promises);
-            const validResults = results.filter(r => typeof r === 'string' && r.length > 0);
-            if (validResults.length === 0) return "Error: All models failed to respond.";
-
+            const validResults = results.filter(r=>typeof r==='string'&&r.length>0);
+            if(validResults.length===0) return "Error: All models failed.";
             const fusedOutput = validResults.join('\n---\n').trim();
-            if (fusedOutput === lastFusedOutput) {
-                converged = true;
-                this.proofTracker.proofCycle(true);
-            } else {
-                this.proofTracker.proofCycle(false);
-            }
-
+            if(fusedOutput===lastFusedOutput){ converged=true; this.proofTracker.proofCycle(true); } else { this.proofTracker.proofCycle(false); }
             lastFusedOutput = fusedOutput;
-            // Update the prompt for the next iteration with the output from the last cycle
-            currentPrompt = systemPrompt + this.initialPrompt + `\n\n[PREVIOUS ITERATION OUTPUT - Use this to improve the next output]\n${fusedOutput}`;
-            this.logEvent('CONSENSUS_LOOP', `Iteration ${i + 1}, Converged: ${converged}`);
+            currentPrompt = systemPrompt + this.initialPrompt + `\n\n[PREVIOUS OUTPUT]\n${fusedOutput}`;
+            this.logEvent('CONSENSUS_LOOP',`Iteration ${i+1}, Converged: ${converged}`);
         }
-
         return lastFusedOutput;
     }
-
-    /**
-     * Extracts code blocks using regex.
-     */
-    parseCodeBlocks(content) {
-        return [...content.matchAll(/```(\w+)\s*([\s\S]*?)```/g)].map(match => ({
-            language: match[1].toLowerCase(),
-            code: match[2].trim(),
-        }));
-    }
-
-    /**
-     * Saves extracted code blocks to the filesystem and the blobs database.
-     */
-    async handleCodeGeneration(content) {
-        const blocks = this.parseCodeBlocks(content);
-        if (blocks.length === 0) return;
-
-        const projectName = this.options.project || `task_${this.taskId.substring(0, 8)}`;
-        const projectPath = path.join(PROJECTS_DIR, projectName);
-        fs.mkdirSync(projectPath, { recursive: true });
-
-        for (const [i, block] of blocks.entries()) {
-            const ext = this.getFileExtension(block.language);
-            const fileName = `${block.language}_${i}.${ext}`;
-            const filePath = path.join(projectPath, fileName);
-            fs.writeFileSync(filePath, block.code);
-            this.saveBlob(projectName, filePath, block.code);
+    parseCodeBlocks(content){ return [...content.matchAll(/```(\w+)\s*([\s\S]*?)```/g)].map(m=>({language:m[1].toLowerCase(),code:m[2].trim()})); }
+    async handleCodeGeneration(content){
+        const blocks=this.parseCodeBlocks(content);
+        if(blocks.length===0) return;
+        const projectName=this.options.project||`task_${this.taskId.substring(0,8)}`;
+        const projectPath=path.join(PROJECTS_DIR,projectName);
+        fs.mkdirSync(projectPath,{recursive:true});
+        for(const [i,block] of blocks.entries()){
+            const ext=this.getFileExtension(block.language);
+            const fileName=`${block.language}_${i}.${ext}`;
+            const filePath=path.join(projectPath,fileName);
+            fs.writeFileSync(filePath,block.code);
+            this.saveBlob(projectName,filePath,block.code);
             console.log(`\x1b[32m[SUCCESS]\x1b[0m Generated file: ${filePath}`);
         }
-
         this.gitCommit(projectName);
     }
-
-    /**
-     * Simple language to extension mapping.
-     */
-    getFileExtension(lang) {
-        return ({
-            python: 'py',
-            javascript: 'js',
-            html: 'html',
-            css: 'css',
-            php: 'php',
-            sql: 'sql',
-            bash: 'sh',
-            go: 'go'
-        })[lang] || 'txt';
-    }
-
-    /**
-     * Saves the prompt/response and proof state to the AI_DATA_DB.
-     */
-    saveMemory(prompt, response) {
-        const proofState = JSON.stringify(this.proofTracker.getState());
-        aiDataDb.run(
-            "INSERT INTO memories (task_id, prompt, response, proof_state) VALUES (?, ?, ?, ?)",
-            [this.taskId, prompt, response, proofState]
-        );
-    }
-
-    /**
-     * Saves file content to the BLOBS_DB.
-     */
-    saveBlob(proj, file, content) {
-        blobsDb.run(
-            "INSERT INTO blobs (project_name, file_path, content) VALUES (?, ?, ?)",
-            [proj, path.basename(file), content]
-        );
-    }
-
-    /**
-     * Logs events to the AI_DATA_DB.
-     */
-    logEvent(type, msg) {
-        aiDataDb.run(
-            "INSERT INTO events (event_type, message) VALUES (?, ?)",
-            [type, msg]
-        );
-    }
-
-    /**
-     * Commits the new project files to the AI_HOME git repository.
-     */
-    gitCommit(projectName) {
-        exec(`git -C ${AI_HOME} add . && git -C ${AI_HOME} commit -m "feat: AI project ${projectName}"`, (err, stdout, stderr) => {
-            if (err) this.logEvent('GIT_ERROR', `Failed to commit ${projectName}: ${stderr}`);
-            else this.logEvent('GIT_SUCCESS', `Committed project ${projectName}`);
-        });
-    }
-
-    /**
-     * Main execution lifecycle method.
-     */
-    async execute() {
-        this.logEvent('ORCHESTRATION_START', `Task ${this.taskId} started.`);
-        const finalOutput = await this.recursiveConsensus();
+    getFileExtension(lang){ return ({python:'py',javascript:'js',html:'html',css:'css',php:'php',sql:'sql',bash:'sh',go:'go'})[lang]||'txt'; }
+    saveMemory(prompt,response){ const proofState=JSON.stringify(this.proofTracker.getState()); aiDataDb.run("INSERT INTO memories (task_id,prompt,response,proof_state) VALUES (?,?,?,?)",[this.taskId,prompt,response,proofState]); }
+    saveBlob(proj,file,content){ blobsDb.run("INSERT INTO blobs (project_name,file_path,content) VALUES (?,?,?)",[proj,path.basename(file),content]); }
+    logEvent(type,msg){ aiDataDb.run("INSERT INTO events (event_type,message) VALUES (?,?)",[type,msg]); }
+    gitCommit(projectName){ exec(`git -C ${AI_HOME} add . && git -C ${AI_HOME} commit -m "feat: AI project ${projectName}"`,(err,stdout,stderr)=>{ if(err)this.logEvent('GIT_ERROR',`Failed to commit ${projectName}: ${stderr}`); else this.logEvent('GIT_SUCCESS',`Committed project ${projectName}`); }); }
+    async execute(){
+        this.logEvent('ORCHESTRATION_START',`Task ${this.taskId} started.`);
+        const finalOutput=await this.recursiveConsensus();
         console.log("\n\x1b[1;36m--- Final Consensus Output ---\x1b[0m\n");
         console.log(finalOutput);
-        this.saveMemory(this.initialPrompt, finalOutput);
+        this.saveMemory(this.initialPrompt,finalOutput);
         await this.handleCodeGeneration(finalOutput);
-        this.logEvent('ORCHESTRATION_END', `Task ${this.taskId} finished.`);
+        this.logEvent('ORCHESTRATION_END',`Task ${this.taskId} finished.`);
     }
 }
 
-// --- Main Execution ---
-(async () => {
-    // Parse arguments: prompt is everything not prefixed with '--'
-    const args = process.argv.slice(2);
-    const prompt = args.filter(arg => !arg.startsWith('--')).join(' ');
-    
-    // Options are parsed from '--key=value' or '--key' flags
-    const options = Object.fromEntries(
-        args
-            .filter(arg => arg.startsWith('--'))
-            .map(arg => {
-                const parts = arg.slice(2).split('=');
-                return [parts[0], parts.length > 1 ? parts.slice(1).join('=') : true];
-            })
-    );
-
-    if (!prompt) process.exit(1);
-
-    const orchestrator = new AIOrchestrator(prompt, options);
-    await orchestrator.execute().finally(() => {
-        aiDataDb.close();
-        blobsDb.close();
-    });
+(async()=>{
+    const args=process.argv.slice(2);
+    const prompt=args.filter(a=>!a.startsWith('--')).join(' ');
+    const options=Object.fromEntries(args.filter(a=>a.startsWith('--')).map(a=>{ const p=a.slice(2).split('='); return [p[0],p.length>1?p.slice(1).join('='):true]; }));
+    if(!prompt) process.exit(1);
+    const orchestrator=new AIOrchestrator(prompt,options);
+    await orchestrator.execute().finally(()=>{ aiDataDb.close(); blobsDb.close(); });
 })();
-EOF_JS
-
-setup_environment() {
-    # Create all necessary persistent directories
-    mkdir -p "$AI_HOME" "$TASKS_DIR" "$PROJECTS_DIR" "$DB_DIR" "$SSH_DIR" "$PLUGIN_DIR" "$LOG_DIR"
-    
-    # Write the Fused JavaScript Orchestrator (.mjs)
-    echo "$JS_ORCHESTRATOR_CONTENT" > "$ORCHESTRATOR_FILE"
-    echo "[INFO] Created persistent orchestrator file: $ORCHESTRATOR_FILE"
-
-    # Write the Python Webserver, Wallet, and Seed Manager
-    cat > "$AI_HOME/manager.py" << 'EOF'
-import http.server, socketserver, json, sqlite3, os, sys, argparse
-
-try:
-    # Requires 'pip install bip-utils'
-    from bip_utils import Bip39SeedGenerator, Bip44, Bip44Coins 
-    BIP_UTILS_AVAILABLE = True
-except ImportError:
-    BIP_UTILS_AVAILABLE = False
-
-AI_HOME = os.path.expanduser("~/.sysop-ai")
-DB_DIR = os.path.join(AI_HOME, "db")
-WALLET_DB_PATH = os.path.join(DB_DIR, "wallet.db")
-
-def setup_wallet_db():
-    os.makedirs(DB_DIR, exist_ok=True)
-    conn = sqlite3.connect(WALLET_DB_PATH)
-    c = conn.cursor()
-    c.execute('CREATE TABLE IF NOT EXISTS seeds (id INTEGER PRIMARY KEY, mnemonic TEXT UNIQUE)')
-    c.execute('CREATE TABLE IF NOT EXISTS wallets (id INTEGER PRIMARY KEY, name TEXT, coin_type TEXT, address TEXT, private_key TEXT)')
-    conn.commit()
-    conn.close()
-
-def manage_seed(action):
-    if not BIP_UTILS_AVAILABLE:
-        print("Error: 'bip_utils' library not found. Please run 'pip install bip-utils'", file=sys.stderr)
-        return
-    setup_wallet_db()
-    conn = sqlite3.connect(WALLET_DB_PATH)
-    c = conn.cursor()
-    if action == 'generate':
-        # Generate 12 words
-        mnemonic = Bip39SeedGenerator.FromWordsNumber(12).Generate()
-        try:
-            c.execute("INSERT INTO seeds (mnemonic) VALUES (?)", (mnemonic,))
-            conn.commit()
-            print(f"Generated and saved new seed: {mnemonic}")
-        except sqlite3.IntegrityError:
-            print("Generated a duplicate seed, which is highly unlikely. Try again.")
-    elif action == 'list':
-        print("\n--- Stored Seeds ---")
-        for row in c.execute("SELECT id, mnemonic FROM seeds"):
-            print(f"ID {row[0]}: {row[1]}")
-        print("--------------------\n")
-    conn.close()
-
-def manage_wallet(action, name="default"):
-    # Wallet management logic would go here
-    print(f"Wallet action '{action}' for wallet '{name}' is not fully implemented yet.")
-
-class APIHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps({"status": "SysOp-AI Server is running"}).encode())
-
-def run_server():
-    PORT = 8000
-    with socketserver.TCPServer(("", PORT), APIHandler) as httpd:
-        print(f"Serving at http://localhost:{PORT}")
-        httpd.serve_forever()
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SysOp-AI Manager")
-    subparsers = parser.add_subparsers(dest='command')
-    
-    server_parser = subparsers.add_parser('server', help='Run the web server')
-    
-    seed_parser = subparsers.add_parser('seed', help='Manage seed phrases')
-    seed_parser.add_argument('action', choices=['generate', 'list'])
-    
-    wallet_parser = subparsers.add_parser('wallet', help='Manage wallets')
-    wallet_parser.add_argument('action', choices=['create', 'list'])
-    wallet_parser.add_argument('--name', default='default')
-    
-    args = parser.parse_args()
-    
-    if args.command == 'server':
-        run_server()
-    elif args.command == 'seed':
-        manage_seed(args.action)
-    elif args.command == 'wallet':
-        manage_wallet(args.action, args.name)
 EOF
-
-    # Initialize Databases
-    # Ensure tables exist for the new orchestrator's needs
-    sqlite3 "$AI_DATA_DB" "CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, task_id TEXT, prompt TEXT, response TEXT, proof_state TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
-    sqlite3 "$AI_DATA_DB" "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, event_type TEXT, message TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
-    sqlite3 "$BLOBS_DB" "CREATE TABLE IF NOT EXISTS blobs (id INTEGER PRIMARY KEY, project_name TEXT, file_path TEXT, content BLOB, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
-    
-    # Initialize Git Repo
-    if [ ! -d "$AI_HOME/.git" ]; then
-        git init -b devel "$AI_HOME" &>/dev/null
-        log_event "INFO" "Initialized Git repository in $AI_HOME"
-    fi
+log_event "INFO" "Created full orchestrator file at $ORCHESTRATOR_FILE"
 }
 
-# Log an event to console and DB
-log_event() {
-    echo "[\x1b[34m$1\x1b[0m] $(date): $2"
-    sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$1', '$2');"
-}
-
-# Display help message
 show_help() {
-    echo "SysOp-AI: A self-contained AI orchestration framework (v3.0)."
-    echo ""
-    echo "USAGE:"
-    echo "  ai <prompt> [flags]   (Default: runs the prompt as a consensus task)"
-    echo "  ai [COMMAND] [ARGUMENTS]"
-    echo ""
-    echo "DEFAULT BEHAVIOR (NEW ROUTING LOGIC):"
-    echo "  - Prompt contains '-': Direct execution via Ollama (Bypasses consensus loop)."
-    echo "  - Prompt contains NO '-': Routes through the Node.js consensus orchestrator."
-    echo ""
-    echo "COMMANDS:"
-    echo "  run <prompt>        Run an AI task using multi-model consensus."
-    echo "  import <url>        Pull external content to provide context for a run."
-    echo "  memories            Show past AI prompts/responses."
-    echo "  events              Show event logs."
-    echo "  blobs               List stored file blobs."
-    echo "  ssh-key [ls|gen]    Manage SSH keys."
-    echo "  seed [generate|list] Manage wallet seed phrases."
-    echo "  wallet [create|list] Manage wallets (not fully implemented)."
-    echo "  server              Start the Python web server (port 8000)."
-    echo "  status              Show environment, tools, and model statuses."
-    echo "  --start             Interactively start a new named project session."
-    echo "  --stop              Stop the current project session."
-    echo "  --help              Show this help message."
-    echo ""
-    echo "FLAGS FOR 'run' (and default prompt):"
-    echo "  --project=<name>    Assign a name to the project for generated files (e.g., ai run 'create app' --project=my-app)."
+cat <<EOF
+SysOp-AI Bash Orchestrator
+Usage: ai <command> [args]
+
+Commands:
+  run <prompt>         Run AI task via orchestrator
+  --start <name>       Start project session
+  --stop               Stop current session
+  ssh-key [ls|gen]     Manage SSH keys
+  status               Show environment and dependency status
+  --help               Show this help
+EOF
 }
 
-# Helper function to run the orchestrator with session check
-run_ai_task() {
-    local full_prompt="$*"
-
-    # 1. Hyphen Check: If prompt contains a hyphen, route directly to Ollama (quick escape route)
-    if [[ "$full_prompt" == *\-* ]]; then
-        echo "[INFO] Prompt contains a hyphen ('$full_prompt'). Bypassing orchestrator and sending directly to Ollama."
-        if command -v "$OLLAMA_BIN" &> /dev/null; then
-            # Run Ollama directly using llama3 as a default fast model
-            "$OLLAMA_BIN" run llama3 "$full_prompt"
-        else
-            echo "[ERROR] Ollama command not found. Cannot execute hyphenated prompt directly."
-        fi
-        return
-    fi
-
-    # 2. Non-Hyphenated Prompt: Route to Orchestrator (.mjs)
-    local prompt="$full_prompt"
-
-    # Append project flag if session is active
-    if [ -f "$SESSION_FILE" ]; then
-        local proj_name=$(cat "$SESSION_FILE")
-        prompt="$prompt --project=$proj_name"
-    fi
-
-    log_event "TASK_START" "Prompt: $prompt"
-    if [ ! -f "$ORCHESTRATOR_FILE" ]; then
-        log_event "ERROR" "Orchestrator file not found. Run 'ai status' or 'ai setup'."
-        return
-    fi
-
-    # Execute the Node.js orchestrator, passing the prompt and any flags
-    node "$ORCHESTRATOR_FILE" $prompt
-    log_event "TASK_END" "Task finished."
-}
-
-
-# --- Command Functions ---
-
-# Manage SSH Keys
-manage_ssh() {
-    case "$1" in
-        ls) ls -la "$SSH_DIR" ;;
-        gen)
-            read -p "Enter key name (e.g., id_rsa_project): " key_name
-            ssh-keygen -t rsa -b 4096 -f "$SSH_DIR/$key_name"
-            log_event "SSH" "Generated new key: $key_name"
-            ;;
-        *) echo "Usage: ai ssh-key [ls|gen]" ;;
-    esac
-}
-
-
-# --- Main Execution ---
+# --- Initialize ---
 check_dependencies
-setup_environment
+setup_node_modules
+setup_orchestrator
 
-# If no arguments, show status as the default action
-if [ $# -eq 0 ]; then
-    status_check
-    exit 0
-fi
-
-COMMAND="$1"
-shift
-
+# --- CLI Routing ---
+if [ $# -eq 0 ]; then status_check; exit 0; fi
+COMMAND="$1"; shift
 case "$COMMAND" in
-    --start)
-        read -p "Enter project/repo name: " proj_name
-        echo "$proj_name" > "$SESSION_FILE"
-        log_event "SESSION" "Started session for project '$proj_name'"
-        ;;
-    --stop)
-        rm -f "$SESSION_FILE"
-        log_event "SESSION" "Stopped session."
-        ;;
-    run)
-        run_ai_task "$@"
-        ;;
-    import)
-        URL="$1"
-        CONTENT=$(curl -sL "$URL")
-        log_event "IMPORT" "Importing content from $URL"
-        echo "Import complete. Sending content to consensus engine for analysis..."
-        run_ai_task "Analyze and summarize the following content, identifying all key technical requirements and entities: $CONTENT"
-        ;;
-    memories) sqlite3 -header -column "$AI_DATA_DB" "SELECT id, task_id, substr(prompt, 1, 40) as prompt, ts FROM memories ORDER BY ts DESC;" ;;
-    events) sqlite3 -header -column "$AI_DATA_DB" "SELECT * FROM events ORDER BY ts DESC;" ;;
-    blobs) sqlite3 -header -column "$BLOBS_DB" "SELECT id, project_name, file_path, length(content) as size, ts FROM blobs ORDER BY ts DESC;" ;;
+    --start) start_session "$1" ;;
+    --stop) stop_session ;;
+    run) run_ai_task "$@" ;;
     ssh-key) manage_ssh "$@" ;;
-    seed) python3 "$AI_HOME/manager.py" seed "$@" ;;
-    wallet) python3 "$AI_HOME/manager.py" wallet "$@" ;;
-    server) python3 "$AI_HOME/manager.py" server & ;;
     status) status_check ;;
     --help|-h) show_help ;;
-    *) # Default to 'run' if no other command matches
-        # $COMMAND is the first word of the prompt, and $@ is the rest.
-        run_ai_task "$COMMAND $@"
-        ;;
+    *) run_ai_task "$COMMAND $*" ;;
 esac

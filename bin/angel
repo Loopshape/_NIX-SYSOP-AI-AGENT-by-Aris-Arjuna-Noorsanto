@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# AI Unified CLI v1.09 Full-Feature Single-File
+set -euo pipefail
+IFS=$'\n\t'
+
+# ---------------------------
+# 0. ENV & PATHS
+# ---------------------------
+AI_HOME="${AI_HOME:-$HOME/.local_ai}"
+PROJECTS_DIR="$AI_HOME/projects"
+TMP_DIR="$AI_HOME/tmp"
+LOG_DIR="$AI_HOME/logs"
+DOWNLOADS_DIR="$AI_HOME/downloads"
+OUTPUTS_DIR="$AI_HOME/outputs"
+CORE_DB="$AI_HOME/agent_core.db"
+TASK_DB="$AI_HOME/ai_task_manager.db"
+HMAC_SECRET_KEY="$AI_HOME/secret.key"
+OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434/api/generate}"
+
+MODELS=("core" "loop" "code" "coin" "2244")
+DEFAULT_AGI_LOOPS=12
+MAX_RAM_BYTES=4096000
+
+mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$TMP_DIR" "$LOG_DIR" "$DOWNLOADS_DIR" "$OUTPUTS_DIR"
+
+# ---------------------------
+# 1. LOGGING
+# ---------------------------
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+log() { printf "[%s] %s\n" "$(date '+%H:%M:%S')" "$*"; }
+log_info() { log "${BLUE}[INFO] $*${NC}"; }
+log_warn() { log "${YELLOW}[WARN] $*${NC}"; }
+log_error() { log "${RED}[ERROR] $*${NC}"; }
+log_ok() { log "${GREEN}[OK] $*${NC}"; }
+
+# ---------------------------
+# 2. DB HELPERS
+# ---------------------------
+sqlite_exec() { sqlite3 "$1" "$2"; }
+sqlite_escape() { printf "%s" "$1" | sed "s/'/''/g"; }
+
+init_db() {
+    sqlite_exec "$CORE_DB" "
+    CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY,prompt_hash TEXT UNIQUE,prompt TEXT,response_ref TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS agi_loops(id INTEGER PRIMARY KEY,task_id TEXT,loop_number INTEGER,model TEXT,input TEXT,output TEXT,status TEXT DEFAULT 'completed',created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS mindflow(id INTEGER PRIMARY KEY,task_id TEXT,node_id TEXT,parent_id TEXT,model TEXT,content TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);"
+
+    sqlite_exec "$TASK_DB" "
+    CREATE TABLE IF NOT EXISTS projects(hash TEXT PRIMARY KEY,path TEXT NOT NULL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS file_hashes(project_hash TEXT,file_path TEXT,file_hash TEXT,mime_type TEXT,rehashed INTEGER DEFAULT 0,PRIMARY KEY(project_hash,file_path));
+    CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,ts DATETIME DEFAULT CURRENT_TIMESTAMP,type TEXT,data TEXT);"
+
+    [[ -f "$HMAC_SECRET_KEY" ]] || openssl rand -hex 32 > "$HMAC_SECRET_KEY"
+}
+
+# ---------------------------
+# 3. HASHING & SWAP
+# ---------------------------
+hash_string() { printf "%s" "$1" | sha256sum | awk '{print $1}'; }
+store_output() {
+    local content="$1"
+    local h; h=$(hash_string "$content")
+    if ((${#content} > MAX_RAM_BYTES)); then
+        local path="$TMP_DIR/$h.txt.gz"
+        printf "%s" "$content" | gzip > "$path"
+        echo "$path"
+    else
+        echo "$content"
+    fi
+}
+retrieve_output() {
+    local ref="$1"
+    if [[ -f "$ref" ]]; then [[ "$ref" == *.gz ]] && gzip -dc "$ref" || cat "$ref"; else printf "%s" "$ref"; fi
+}
+
+# ---------------------------
+# 4. UTILS: FILE/URL/ZIP
+# ---------------------------
+get_mime() { file --mime-type -b "$1" 2>/dev/null || echo "application/octet-stream"; }
+download_url() {
+    local url="$1" out="$DOWNLOADS_DIR/$(basename "${url%%\?*}")"
+    curl -L --fail -sS "$url" -o "$out" || { log_warn "Failed download: $url"; return 1; }
+    log_info "Downloaded $url -> $out"; echo "$out"
+}
+import_zip() {
+    local zip="$1" dest="${2:-$TMP_DIR}"; [[ -f "$zip" ]] || { log_warn "ZIP not found: $zip"; return 1; }
+    mkdir -p "$dest"; unzip -oq "$zip" -d "$dest"; log_info "Extracted $zip -> $dest"; echo "$dest"
+}
+
+# ---------------------------
+# 5. PROJECT / FILE MANAGEMENT
+# ---------------------------
+hash_file() { sha256sum "$1" | awk '{print $1}'; }
+hash_dir() { find "$1" -type f -exec sha256sum {} \; | sort | sha256sum | awk '{print $1}'; }
+
+ingest_project() {
+    local repo="$1"; [[ -d "$repo" ]] || { log_error "Not a directory: $repo"; return 1; }
+    local proj_hash; proj_hash=$(hash_dir "$repo")
+    sqlite_exec "$TASK_DB" "INSERT OR IGNORE INTO projects(hash,path) VALUES('$(sqlite_escape "$proj_hash")','$(sqlite_escape "$repo")');"
+    find "$repo" -type f -print0 | while IFS= read -r -d '' f; do
+        local fh; fh=$(hash_file "$f")
+        local mt; mt=$(get_mime "$f")
+        sqlite_exec "$TASK_DB" "INSERT OR REPLACE INTO file_hashes(project_hash,file_path,file_hash,mime_type,rehashed) VALUES('$(sqlite_escape "$proj_hash")','$(sqlite_escape "$f")','$fh','$mt',0);"
+    done
+    log_ok "Ingested project: $repo -> $proj_hash"; printf "%s" "$proj_hash"
+}
+rehash_project() {
+    local proj_hash="$1"; local base; base=$(sqlite3 "$TASK_DB" "SELECT path FROM projects WHERE hash='$(sqlite_escape "$proj_hash")' LIMIT 1;")
+    [[ -n "$base" ]] || { log_error "Unknown project hash $proj_hash"; return 1; }
+    find "$base" -type f -print0 | while IFS= read -r -d '' f; do
+        local fh; fh=$(hash_file "$f")
+        sqlite_exec "$TASK_DB" "UPDATE file_hashes SET file_hash='$fh',rehashed=1 WHERE project_hash='$(sqlite_escape "$proj_hash")' AND file_path='$(sqlite_escape "$f")';"
+    done
+    log_info "Rehashed project: $proj_hash"
+}
+
+regex_scan_project() {
+    local proj="${1:-$PROJECTS_DIR}" pattern="${2:-.}"
+    find "$proj" -type f -print0 | xargs -0 -n1 -I{} sh -c "grep -Hn --binary-files=without-match -E '${pattern}' '{}' || true"
+}
+
+# ---------------------------
+# 6. LINT / FORMAT
+# ---------------------------
+lint_and_format() {
+    local f="$1"
+    [[ "$f" == *.js || "$f" == *.ts ]] && command -v eslint >/dev/null 2>&1 && eslint --fix "$f" 2>/dev/null || true
+    command -v prettier >/dev/null 2>&1 && prettier --write "$f" 2>/dev/null || true
+    [[ "$f" == *.py ]] && command -v black >/dev/null 2>&1 && black "$f" >/dev/null 2>&1 || true
+}
+
+highlight_file() {
+    local f="$1"; command -v bat >/dev/null 2>&1 && bat --paging=never "$f" || sed -n '1,200p' "$f"
+}
+
+# ---------------------------
+# 7. WALLET / BTC SIMULATION
+# ---------------------------
+wallet_connect() { log_info "Wallet connect (mnemonic len=${#1})"; echo "wallet_$(hash_string "${1:0:16}")"; }
+btc_analyze() { log_info "BTC analysis (simulated)"; echo '{"symbol":"BTC/USD","rsi":52,"macd":"neutral","support":27000,"resistance":29500}'; }
+btc_trade_simulate() { log_info "BTC $1 simulation amt=${2:-0}"; echo "{\"action\":\"$1\",\"amount\":${2:-0},\"status\":\"simulated\"}"; }
+
+# ---------------------------
+# 8. WEBKIT BUILD
+# ---------------------------
+build_webkit() {
+    local build_dir="$TMP_DIR/webkit_build"; mkdir -p "$build_dir"
+    log_info "Starting WebKit build (simulated)"
+    echo "simulated build" > "$LOG_DIR/webkit_build.log"; log_ok "WebKit build complete (logs: $LOG_DIR/webkit_build.log)"
+}
+
+# ---------------------------
+# 9. AGI LIVE INTERLEAVED 5-MODEL
+# ---------------------------
+run_worker_streaming() {
+    local model="$1" user_prompt="$2" out_pipe="$3"
+    if curl --silent --fail --max-time 2 "$OLLAMA_URL" -o /dev/null 2>/dev/null; then
+        local payload
+        payload=$(jq -nc --arg m "$model" --arg p "$user_prompt" '{model:$m,prompt:$p,stream:true}')
+        curl -s --no-buffer -X POST "$OLLAMA_URL" -d "$payload" > "$out_pipe" || true
+    else
+        # fallback simulated streaming
+        { for n in $(seq 1 6); do printf "[%s][%s] token%02d\n" "$model" "$(date '+%T')" "$n"; sleep 0.03; done; printf "[%s][%s] [FINAL_ANSWER]\n" "$model" "$(date '+%T')"; } > "$out_pipe"
+    fi
+}
+
+insert_agi_loop_record() {
+    local task_id="$1" loop_num="$2" model="$3" input="$4" output="$5"
+    sqlite_exec "$CORE_DB" "INSERT INTO agi_loops(task_id,loop_number,model,input,output,status) VALUES('$(sqlite_escape "$task_id")',$loop_num,'$(sqlite_escape "$model")','$(sqlite_escape "$input")','$(sqlite_escape "$output")','completed');"
+}
+
+insert_mindflow_node() {
+    local task_id="$1" node_id="$2" parent="$3" model="$4" content="$5"
+    sqlite_exec "$CORE_DB" "INSERT INTO mindflow(task_id,node_id,parent_id,model,content) VALUES('$(sqlite_escape "$task_id")','$(sqlite_escape "$node_id")','$(sqlite_escape "$parent")','$(sqlite_escape "$model")','$(sqlite_escape "$content")');"
+}
+
+run_agi_mindflow() {
+    local user_prompt="$*"
+    local task_id; task_id=$(hash_string "$user_prompt$(date +%s%N)" | cut -c1-16)
+    local workspace="$PROJECTS_DIR/task-$task_id"; mkdir -p "$workspace"/{tmp,outputs}
+
+    log_ok "AGI Mindflow task $task_id workspace init: $workspace"
+
+    # check memory cache
+    local p_h; p_h=$(hash_string "$user_prompt")
+    local cached_ref; cached_ref=$(sqlite3 "$CORE_DB" "SELECT response_ref FROM memories WHERE prompt_hash='$(sqlite_escape "$p_h")' LIMIT 1;")
+    [[ -n "$cached_ref" ]] && { log_info "Returning cached response"; retrieve_output "$cached_ref"; return 0; }
+
+    # AGI loops
+    local loop_num=0 MAX_LOOPS=$DEFAULT_AGI_LOOPS
+    while (( loop_num < MAX_LOOPS )); do
+        loop_num=$((loop_num+1))
+        log_info "AGI loop $loop_num/$MAX_LOOPS (task $task_id)"
+        declare -A out_files
+        for model in "${MODELS[@]}"; do
+            local outf="$workspace/tmp/${model}_loop${loop_num}.out"
+            out_files["$model"]="$outf"
+            run_worker_streaming "$model" "$user_prompt" "$outf" &
+        done
+        wait
+
+        # fuse outputs
+        local fused=""
+        for model in "${MODELS[@]}"; do
+            local file="${out_files[$model]}"
+            [[ -f "$file" ]] || { log_warn "Output missing for $model"; continue; }
+            local model_output; model_output=$(cat "$file")
+            insert_agi_loop_record "$task_id" "$loop_num" "$model" "$user_prompt" "$model_output"
+            local node_id; node_id="$(hash_string "$task_id|$loop_num|$model")"
+            insert_mindflow_node "$task_id" "$node_id" "" "$model" "$model_output"
+            fused+=$'\n'"[$model] $model_output"
+            [[ "$model_output" =~ \[FINAL_ANSWER\] ]] && { local final_ref; final_ref=$(store_output "$model_output"); sqlite_exec "$CORE_DB" "INSERT OR REPLACE INTO memories(prompt_hash,prompt,response_ref) VALUES('$(sqlite_escape "$p_h")','$(sqlite_escape "$user_prompt")','$(sqlite_escape "$final_ref")');" ; retrieve_output "$final_ref"; return 0; }
+        done
+
+        printf "%s\n" "$fused" > "$workspace/outputs/mindmap_loop${loop_num}.txt"
+    done
+
+    # store fused result if no FINAL_ANSWER
+    local fused_full; fused_full=$(cat "$workspace/outputs/"*.txt 2>/dev/null || echo "no-mindmap")
+    local store_ref; store_ref=$(store_output "$fused_full")
+    sqlite_exec "$CORE_DB" "INSERT OR REPLACE INTO memories(prompt_hash,prompt,response_ref) VALUES('$(sqlite_escape "$p_h")','$(sqlite_escape "$user_prompt")','$(sqlite_escape "$store_ref")');"
+    log_ok "AGI Mindflow completed for task $task_id"
+    retrieve_output "$store_ref"
+}
+
+# ---------------------------
+# 10. MAIN DISPATCH
+# ---------------------------
+usage() {
+    cat <<EOF
+AI CLI v1.09
+Commands:
+  agi "<prompt>"                Run 5-model interleaved AGI
+  ingest <dir>                  Ingest project
+  rehash <project_hash>         Rehash project files
+  scan <dir> <regex>            Regex scan project
+  lint <file>                   Lint & format
+  highlight <file>              Show file with syntax
+  download <url>                Download URL
+  unzip <file> [dest]           Unzip
+  webkit                        WebKit build (simulated)
+  wallet connect "<mnemonic>"   Connect wallet
+  btc analyze|buy|sell [amt]    BTC simulation
+  logs                          Show logs
+  dbdump <core|task>            Dump DB schema & counts
+  help                          Show this help
+EOF
+}
+
+main() {
+    init_db
+    local cmd="${1:-help}"; shift || true
+    case "$cmd" in
+        agi) run_agi_mindflow "$*" ;;
+        ingest) ingest_project "$1" ;;
+        rehash) rehash_project "$1" ;;
+        scan) regex_scan_project "${1:-$PROJECTS_DIR}" "${2:-.}" ;;
+        lint) lint_and_format "$1" ;;
+        highlight) highlight_file "$1" ;;
+        download) download_url "$1" ;;
+        unzip) import_zip "$1" "${2:-}" ;;
+        webkit) build_webkit ;;
+        wallet) case "$1" in connect) wallet_connect "$2" ;; *) log_warn "wallet connect only" ;; esac ;;
+        btc) case "$1" in analyze) btc_analyze ;; buy|sell) btc_trade_simulate "$1" "${2:-0}" ;; *) log_warn "btc: analyze|buy|sell" ;; esac ;;
+        logs) tail -n 200 "$LOG_DIR/system.log" ;;
+        dbdump) sqlite3 "$CORE_DB" ".schema"; sqlite3 "$TASK_DB" ".schema" ;;
+        help|--help|-h) usage ;;
+        *) log_warn "Unknown command: $cmd"; usage ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
+
+# ---------------------------
+# 11. EMPATHIC CREATIVE FALLBACK
+# ---------------------------
+empath_fallback() {
+    local prompt="$1"
+    log_warn "AI server offline — using empath creative fallback..."
+    # generate a pseudo-empath response based on prompt keywords
+    local response
+    response=$(echo "$prompt" | tr '[:upper:]' '[:lower:]' | sed -E 's/(love|faith|hope)/Sky wisdom shadow mind pulse fire time song wisdom river/g; s/(fear|pain|loss)/Deep shadow river echo silence/g; s/(war|conflict|battle)/Thunder clash fire sword storm/g')
+    # if empty, provide generic creative fallback
+    [[ -z "$response" ]] && response="Mystic river flows beyond time, mind pulses with hidden wisdom."
+    echo "[EMPATH] - → $response"
+}
+
+run_worker_streaming() {
+    local model="$1" user_prompt="$2" out_pipe="$3"
+
+    # check if Ollama server is reachable
+    if curl --silent --fail --max-time 2 "$OLLAMA_URL" -o /dev/null 2>/dev/null; then
+        local payload
+        payload=$(jq -nc --arg m "$model" --arg p "$user_prompt" '{model:$m,prompt:$p,stream:true}')
+        curl -s --no-buffer -X POST "$OLLAMA_URL" -d "$payload" > "$out_pipe" || true
+    else
+        # fallback: empath creative
+        empath_fallback "$user_prompt" > "$out_pipe"
+    fi
+}
