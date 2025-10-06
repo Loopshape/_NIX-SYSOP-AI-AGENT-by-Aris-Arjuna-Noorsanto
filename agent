@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ----------------- Environment paths -----------------
+AI_HOME="${AI_HOME:-$HOME/.sysop-ai}"
+ENV_HOME="${ENV_HOME:-$HOME/.sysop_ai_env}"
+NODE_MODULES="$AI_HOME/node_modules"
+ORCHESTRATOR="$AI_HOME/orchestrator.mjs"
+
+mkdir -p "$AI_HOME" "$ENV_HOME"
+
+# ----------------- Node path -----------------
+export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
+
+# ----------------- Self-healing -----------------
+check_node_modules() {
+    if ! node -e "import('sqlite3')" &>/dev/null; then
+        echo "[INFO] Node module 'sqlite3' missing. Installing..."
+        npm install --prefix "$AI_HOME" sqlite3
+    fi
+}
+
+# ----------------- Report dependencies -----------------
+report_dependencies() {
+    echo "--- Nemodian AI Self-Healing Report ---"
+    echo "Node.js         : $(node -v)"
+    echo "npm             : $(npm -v)"
+    check_node_modules
+    echo "Node modules    : OK"
+    echo "SQLite3         : $(sqlite3 --version 2>/dev/null || echo 'missing')"
+    if command -v ollama >/dev/null 2>&1; then
+        echo "Ollama CLI      : $(ollama --help | head -n1)"
+    else
+        echo "Ollama CLI      : missing"
+    fi
+    echo "Git             : $(git --version | head -n1)"
+    echo "--------------------------------------"
+}
+
+# ----------------- Parse arguments -----------------
+if [[ $# -eq 0 ]]; then
+    report_dependencies
+    echo "Usage: $0 \"task prompt\" [--project=name] [--setup] [--add-pattern]"
+    exit 0
+fi
+
+PROMPT=""
+declare -A OPTIONS
+for arg in "$@"; do
+    if [[ "$arg" == --* ]]; then
+        key="${arg%%=*}"
+        key="${key#--}"
+        value="${arg#*=}"
+        OPTIONS[$key]="$value"
+    else
+        PROMPT+="$arg "
+    fi
+done
+PROMPT="${PROMPT%" "}"
+
+# ----------------- Setup -----------------
+if [[ "${OPTIONS[setup]:-}" == "true" ]] || [[ " ${@} " =~ " --setup " ]]; then
+    echo "[INFO] Running setup..."
+    mkdir -p "$AI_HOME/plugins"
+    if [[ ! -f "$ORCHESTRATOR" ]]; then
+        echo "[ERROR] Missing orchestrator.mjs at $ORCHESTRATOR"
+    else
+        node "$ORCHESTRATOR" --setup
+    fi
+    exit 0
+fi
+
+# ----------------- Run orchestrator -----------------
+if [[ ! -f "$ORCHESTRATOR" ]]; then
+    echo "[ERROR] Missing orchestrator.mjs at $ORCHESTRATOR"
+    exit 1
+fi
+
+check_node_modules
+
+# Stream the orchestrator output
+node "$ORCHESTRATOR" "$PROMPT" "${OPTIONS[@]/#*/--}"
