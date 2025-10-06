@@ -5,14 +5,17 @@ set -euo pipefail
 AI_HOME="${AI_HOME:-$HOME/.sysop-ai}"
 ENV_HOME="${ENV_HOME:-$HOME/.sysop_ai_env}"
 NODE_MODULES="$AI_HOME/node_modules"
-ORCHESTRATOR="$AI_HOME/orchestrator.mjs"
+PLUGIN_DIR="$AI_HOME/plugins"
+LOG_DIR="$AI_HOME/ollama_logs"
+REGISTRY_FILE="$AI_HOME/pattern_registry.json"
+SUGGESTION_FILE="$AI_HOME/pattern_suggestions.json"
+HISTORY_FILE="$AI_HOME/prompt_history.json"
 
-mkdir -p "$AI_HOME" "$ENV_HOME"
+mkdir -p "$AI_HOME" "$ENV_HOME" "$PLUGIN_DIR" "$LOG_DIR"
 
-# ----------------- Node path -----------------
 export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
 
-# ----------------- Self-healing -----------------
+# ----------------- Node self-healing -----------------
 check_node_modules() {
     if ! node -e "import('sqlite3')" &>/dev/null; then
         echo "[INFO] Node module 'sqlite3' missing. Installing..."
@@ -37,10 +40,10 @@ report_dependencies() {
     echo "--------------------------------------"
 }
 
-# ----------------- Parse arguments -----------------
+# ----------------- Parse args -----------------
 if [[ $# -eq 0 ]]; then
     report_dependencies
-    echo "Usage: $0 \"task prompt\" [--project=name] [--setup] [--add-pattern]"
+    echo "Usage: ai \"task prompt\" [--project=name] [--setup] [--add-pattern]"
     exit 0
 fi
 
@@ -58,25 +61,135 @@ for arg in "$@"; do
 done
 PROMPT="${PROMPT%" "}"
 
-# ----------------- Setup -----------------
-if [[ "${OPTIONS[setup]:-}" == "true" ]] || [[ " ${@} " =~ " --setup " ]]; then
-    echo "[INFO] Running setup..."
-    mkdir -p "$AI_HOME/plugins"
-    if [[ ! -f "$ORCHESTRATOR" ]]; then
-        echo "[ERROR] Missing orchestrator.mjs at $ORCHESTRATOR"
-    else
-        node "$ORCHESTRATOR" --setup
-    fi
-    exit 0
-fi
+# ----------------- Node orchestrator code -----------------
+ORCHESTRATOR=$(mktemp --suffix=.mjs)
 
-# ----------------- Run orchestrator -----------------
-if [[ ! -f "$ORCHESTRATOR" ]]; then
-    echo "[ERROR] Missing orchestrator.mjs at $ORCHESTRATOR"
-    exit 1
-fi
+cat > "$ORCHESTRATOR" <<'EOF'
+import fs from 'fs';
+import path from 'path';
+import { spawnSync } from 'child_process';
 
+const HOME = process.env.HOME || process.cwd();
+const PLUGIN_DIR = path.join(HOME, '.sysop-ai', 'plugins');
+const LOG_DIR = path.join(HOME, '.sysop-ai', 'ollama_logs');
+const REGISTRY_FILE = path.join(HOME, '.sysop-ai', 'pattern_registry.json');
+const SUGGESTION_FILE = path.join(HOME, '.sysop-ai', 'pattern_suggestions.json');
+const HISTORY_FILE = path.join(HOME, '.sysop-ai', 'prompt_history.json');
+
+// Ensure files exist
+[REGISTRY_FILE, SUGGESTION_FILE, HISTORY_FILE].forEach(f => {
+  if (!fs.existsSync(f)) fs.writeFileSync(f, '[]');
+});
+
+// Runtime patterns
+let runtimePatterns = [];
+function loadRegistry() {
+  const data = JSON.parse(fs.readFileSync(REGISTRY_FILE, 'utf-8'));
+  runtimePatterns = data.map(p => ({ regex: new RegExp(p.regex), handler: eval('(' + p.handlerCode + ')') }));
+}
+function saveRegistry() {
+  const data = runtimePatterns.map(p => ({ regex: p.regex.source, handlerCode: p.handler.toString() }));
+  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(data, null, 2));
+}
+function registerPattern(regex, handler) { runtimePatterns.push({ regex, handler }); saveRegistry(); }
+
+// Plugins loader
+async function loadPlugins() {
+  const plugins = [];
+  if (fs.existsSync(PLUGIN_DIR)) {
+    const files = fs.readdirSync(PLUGIN_DIR).filter(f => f.endsWith('.js'));
+    for (const file of files) {
+      try {
+        const plugin = (await import('file://' + path.join(PLUGIN_DIR, file))).default;
+        if (typeof plugin === 'function') plugins.push(plugin);
+      } catch {}
+    }
+  }
+  return plugins;
+}
+
+// Prompt history
+function logPromptHistory(prompt, response) {
+  const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+  history.push({ prompt, response, timestamp: Date.now() });
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+}
+
+// Natural pattern suggestion
+function generateNaturalRegex(prompts) {
+  if (!prompts.length) return null;
+  const tokenized = prompts.map(p => p.prompt.split(/\s+/));
+  const maxLen = Math.max(...tokenized.map(t => t.length));
+  const patternTokens = [];
+  for (let i = 0; i < maxLen; i++) {
+    const column = tokenized.map(t => t[i] || '');
+    const unique = [...new Set(column)];
+    patternTokens.push(unique.length === 1 ? unique[0] : '\\S+');
+  }
+  return new RegExp(patternTokens.join('\\s+'), 'i');
+}
+
+function naturalPatternSuggestion(prompt, response) {
+  logPromptHistory(prompt, response);
+  const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+  const recent = history.slice(-20);
+  const similar = recent.filter(p => prompt.split(/\s+/)[0].toLowerCase() === p.prompt.split(/\s+/)[0].toLowerCase());
+  if (similar.length > 1) {
+    const regex = generateNaturalRegex(similar);
+    const suggestions = JSON.parse(fs.readFileSync(SUGGESTION_FILE, 'utf-8'));
+    if (!suggestions.some(s => s.regex === regex.source)) {
+      suggestions.push({ regex: regex.source, examples: similar });
+      fs.writeFileSync(SUGGESTION_FILE, JSON.stringify(suggestions, null, 2));
+      console.log(`💡 Suggested pattern: ${regex}`);
+    }
+  }
+}
+
+// Ollama fallback
+function ollamaQuery(prompt) {
+  try {
+    const result = spawnSync('ollama', ['query', prompt], { encoding: 'utf-8' });
+    const response = (result.stdout || '').trim() || 'No response from Ollama';
+    const logFile = path.join(LOG_DIR, `ollama_${Date.now()}.json`);
+    fs.writeFileSync(logFile, JSON.stringify({ prompt, response }, null, 2));
+    naturalPatternSuggestion(prompt, response);
+    return { message: response };
+  } catch (err) {
+    return { message: 'Ollama query failed: ' + err.message };
+  }
+}
+
+// Run prompt
+async function runPrompt(prompt) {
+  loadRegistry();
+  for (const { regex, handler } of runtimePatterns) {
+    const match = prompt.match(regex);
+    if (match) return handler({ prompt, match });
+  }
+  const plugins = await loadPlugins();
+  for (const plugin of plugins) {
+    try { return plugin({ prompt }); } catch {}
+  }
+  return ollamaQuery(prompt);
+}
+
+// CLI
+const args = process.argv.slice(2);
+if (args.includes('--setup')) {
+  const examplePlugin = path.join(PLUGIN_DIR, 'plugin-example.js');
+  if (!fs.existsSync(examplePlugin)) {
+    fs.writeFileSync(examplePlugin, "export default async ({prompt}) => ({message:'Example plugin ran: '+prompt});");
+  }
+  console.log('✅ Setup complete!');
+  process.exit(0);
+}
+
+const prompt = args.join(' ');
+runPrompt(prompt).then(res => console.log(res));
+EOF
+
+# ----------------- Run Node orchestrator -----------------
 check_node_modules
-
-# Stream the orchestrator output
 node "$ORCHESTRATOR" "$PROMPT" "${OPTIONS[@]/#*/--}"
+
+rm -f "$ORCHESTRATOR"
