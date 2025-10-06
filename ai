@@ -9,7 +9,7 @@ set -euo pipefail
 # ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝
 #
 # A self-contained AI orchestration framework for local LLMs.
-# Version: 2.2.0 (Hyphenated Routing & Pattern Fusion)
+# Version: 3.0.0 (Multi-Model Consensus & Code Persistence)
 
 # --- Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.sysop-ai}"
@@ -17,7 +17,7 @@ export ENV_HOME="${ENV_HOME:-$HOME/.sysop_ai_env}"
 export NODE_MODULES="$AI_HOME/node_modules"
 export PLUGIN_DIR="$AI_HOME/plugins"
 export LOG_DIR="$AI_HOME/ollama_logs"
-export REGISTRY_FILE="$AI_HOME/pattern_registry.json"
+export REGISTRY_FILE="$AI_HOME/pattern_registry.json" # Kept for future pattern integration
 export SUGGESTION_FILE="$AI_HOME/pattern_suggestions.json"
 export HISTORY_FILE="$AI_HOME/prompt_history.json"
 export ORCHESTRATOR_FILE="$AI_HOME/orchestrator.mjs" # Updated to .mjs for ES modules
@@ -26,8 +26,8 @@ export TASKS_DIR="$AI_HOME/tasks"
 export PROJECTS_DIR="$AI_HOME/projects"
 export DB_DIR="$AI_HOME/db"
 export SSH_DIR="$AI_HOME/ssh"
-export AI_DATA_DB="$DB_DIR/ai_data.db"
-export BLOBS_DB="$DB_DIR/blobs.db"
+export AI_DATA_DB="$DB_DIR/ai_data.db" # Database for memories and events
+export BLOBS_DB="$DB_DIR/blobs.db"     # Database for file content storage
 export WALLET_DB="$DB_DIR/wallet.db"
 export SESSION_FILE="$AI_HOME/.session"
 export OLLAMA_BIN="ollama"
@@ -64,170 +64,279 @@ check_dependencies() {
 
 # Helper function to show status
 status_check() {
-    echo "SysOp-AI Status"
+    echo "SysOp-AI Status (Consensus Engine)"
     echo "AI_HOME: $AI_HOME"
     echo "Ollama: $(command -v $OLLAMA_BIN &> /dev/null && echo 'OK' || echo 'Not Found')"
     echo "SQLite: $(command -v sqlite3 &> /dev/null && echo 'OK' || echo 'Not Found')"
     echo "NodeJS: $(command -v node &> /dev/null && echo 'OK' || echo 'Not Found')"
     echo "Python3: $(command -v python3 &> /dev/null && echo 'OK' || echo 'Not Found')"
     [ -f "$SESSION_FILE" ] && echo "Active Session: $(cat "$SESSION_FILE")" || echo "Active Session: None"
+    echo "Consensus Models: phi3, llama3, codegemma (Ensure they are pulled)"
 }
 
 
 # --- Setup & Orchestrator Content ---
 
-# The full, pattern-matching orchestrator (fused with environment variables)
+# The full, multi-model consensus orchestrator (fused with environment variables)
 read -r -d '' JS_ORCHESTRATOR_CONTENT <<'EOF_JS'
+// orchestrator.mjs
+import { exec } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { spawnSync } from 'child_process';
-import crypto from 'crypto'; 
+import sqlite3Pkg from 'sqlite3';
+const { verbose } = sqlite3Pkg;
+const sqlite3 = verbose();
 
 // Inherit ENV vars from bash script
 const AI_HOME = process.env.AI_HOME;
-const PLUGIN_DIR = process.env.PLUGIN_DIR;
-const LOG_DIR = process.env.LOG_DIR;
-const REGISTRY_FILE = process.env.REGISTRY_FILE;
-const SUGGESTION_FILE = process.env.SUGGESTION_FILE;
-const HISTORY_FILE = process.env.HISTORY_FILE;
+const PROJECTS_DIR = process.env.PROJECTS_DIR;
+const AI_DATA_DB_PATH = process.env.AI_DATA_DB;
+const BLOBS_DB_PATH = process.env.BLOBS_DB;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 
-// Ensure necessary files exist for registry/history
-[REGISTRY_FILE, SUGGESTION_FILE, HISTORY_FILE].forEach(f => {
-  if (!fs.existsSync(f)) fs.writeFileSync(f, '[]');
-});
+// Models used for multi-model consensus
+const MODEL_POOL = ["phi3", "llama3", "codegemma"];
 
-// Static system patterns for core functionality (instruct/think)
-const SYSTEM_PATTERNS = [
-    {
-        // Matches 'instruct <any prompt>' - precise and concise execution
-        regex: /^instruct\s+(.*)/i,
-        handler: ({ match }) => {
-            const instruction = match[1].trim();
-            const enhancedPrompt = `Act as an expert instruction-following system. Execute this request precisely and concisely: "${instruction}"`;
-            console.log(`[AI-MODE] Executing request in 'instruct' mode (precise, concise).`);
-            return ollamaQuery(enhancedPrompt); 
-        }
-    },
-    {
-        // Matches 'think <any prompt>' - detailed and analytical reasoning
-        regex: /^think\s+(.*)/i,
-        handler: ({ match }) => {
-            const thoughtPrompt = match[1].trim();
-            const enhancedPrompt = `Act as a senior analyst. Provide a detailed, analytical, and expansive response to the following query, including your reasoning: "${thoughtPrompt}"`;
-            console.log(`[AI-MODE] Executing request in 'think' mode (detailed, analytical).`);
-            return ollamaQuery(enhancedPrompt); 
-        }
+// Database connections are opened once globally
+const aiDataDb = new sqlite3.Database(AI_DATA_DB_PATH);
+const blobsDb = new sqlite3.Database(BLOBS_DB_PATH);
+
+/**
+ * ProofTracker implements a simple state machine to log task complexity and convergence.
+ */
+class ProofTracker {
+    constructor(initialPrompt) {
+        this.cycleIndex = initialPrompt.length;
+        this.netWorthIndex = (this.cycleIndex % 128) << 2;
+        this.entropyRatio = (this.cycleIndex ^ Date.now()) / 1000;
     }
-];
 
-// Runtime patterns (omitted full CRUD logic for brevity, only loadRegistry remains)
-let runtimePatterns = [];
-function loadRegistry() {
-  try {
-    const data = JSON.parse(fs.readFileSync(REGISTRY_FILE, 'utf-8'));
-    // Note: eval is required here to deserialize the function code stored as a string
-    runtimePatterns = data.map(p => ({ regex: new RegExp(p.regex), handler: eval('(' + p.handlerCode + ')') }));
-  } catch (e) {
-    runtimePatterns = [];
-  }
+    crosslineEntropy(data) {
+        const hash = crypto.createHash('sha256').update(data).digest('hex');
+        this.entropyRatio += parseInt(hash.substring(0, 8), 16);
+    }
+
+    proofCycle(converged) {
+        this.cycleIndex += converged ? 1 : 0;
+        this.netWorthIndex -= converged ? 0 : 1;
+    }
+
+    getState() {
+        return {
+            cycleIndex: this.cycleIndex,
+            netWorthIndex: this.netWorthIndex,
+            entropyRatio: this.entropyRatio
+        };
+    }
 }
 
-// Prompt history
-function logPromptHistory(prompt, response) {
-  try {
-      const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
-      history.push({ prompt, response, timestamp: Date.now() });
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(-100), null, 2)); // Keep last 100
-  } catch (e) { /* silently ignore history errors */ }
-}
+/**
+ * The core orchestrator managing multi-model execution and data persistence.
+ */
+class AIOrchestrator {
+    constructor(prompt, options) {
+        this.initialPrompt = prompt;
+        this.options = options;
+        this.taskId = crypto.createHash('sha256').update(Date.now().toString()).digest('hex');
+        this.proofTracker = new ProofTracker(prompt);
+    }
 
-// Ollama fallback - This function ensures Ollama "writes all" unhandled requests.
-function ollamaQuery(prompt) {
-  try {
-    const MODEL_NAME = 'llama3';
-    
-    console.log(`\n\x1b[34m[INFO]\x1b[0m Sending prompt to default model \x1b[33m'${MODEL_NAME}'\x1b[0m...`);
-    
-    // Using spawnSync for simplicity and synchronous shell execution
-    const result = spawnSync(OLLAMA_BIN, ['run', MODEL_NAME, prompt], { encoding: 'utf-8' });
-    
-    // Capture output
-    const response = (result.stdout || '').trim() || (result.stderr || '').trim() || 'No response from Ollama. Ensure the model (llama3) is installed.';
-    
-    // Log history (simplified history/suggestion logic)
-    logPromptHistory(prompt, response);
-    
-    return { message: response };
-  } catch (err) {
-    return { message: `${OLLAMA_BIN} execution failed: ${err.message}` };
-  }
-}
+    /**
+     * Executes a single Ollama model asynchronously.
+     */
+    runOllama(model, currentPrompt) {
+        return new Promise((resolve, reject) => {
+            console.log(`\n\x1b[34m[INFO]\x1b[0m Model \x1b[33m'${model}'\x1b[0m is thinking...`);
+            // Use exec for synchronous shell output streaming
+            const child = exec(`${OLLAMA_BIN} run ${model} "${currentPrompt.replace(/"/g, '\\"')}"`);
+            let output = '';
+            
+            // Stream output to console while capturing for consensus
+            child.stdout.on('data', data => {
+                process.stdout.write(`\x1b[2m${data}\x1b[0m`);
+                output += data;
+            });
+            child.stderr.on('data', data => process.stderr.write(data));
+            
+            child.on('close', code => {
+                if (code !== 0) return reject(`Model ${model} exited with code ${code}`);
+                resolve(output.trim());
+            });
+        });
+    }
 
-// Plugins loader (simplified for this context)
-async function loadPlugins() {
-  const plugins = [];
-  // Plugin loading logic would go here
-  return plugins;
-}
+    /**
+     * Runs three consensus loops, prompting all models and feeding the fused output back.
+     */
+    async recursiveConsensus() {
+        let systemPrompt = `SYSTEM PROMPT: You are a world-class software engineer. Your response MUST be ONLY the requested artifact. Use markdown for all code blocks (e.g., \`\`\`python ... \`\`\`). Do not include any conversational text outside of the code blocks or explanations. User Task:\n`;
+        let currentPrompt = systemPrompt + this.initialPrompt;
+        let lastFusedOutput = "";
+        let converged = false;
 
-// Run prompt
-async function runPrompt(prompt) {
-  // 1. Check System Patterns (e.g., 'instruct', 'think')
-  for (const { regex, handler } of SYSTEM_PATTERNS) {
-    const match = prompt.match(regex);
-    if (match) return handler({ prompt, match });
-  }
-  
-  // 2. Check Dynamic Runtime Patterns
-  loadRegistry();
-  for (const { regex, handler } of runtimePatterns) {
-    const match = prompt.match(regex);
-    if (match) return handler({ prompt, match });
-  }
-  
-  // 3. Check Plugins
-  const plugins = await loadPlugins();
-  for (const plugin of plugins) {
-    try { 
-        const result = await plugin({ prompt }); 
-        if (result && result.message) return result;
-    } catch {}
-  }
-  
-  // 4. FINAL FALLBACK: Let Ollama write all
-  return ollamaQuery(prompt);
+        for (let i = 0; i < 3 && !converged; i++) {
+            const promises = MODEL_POOL.map(model => this.runOllama(model, currentPrompt).catch(e => e));
+            const results = await Promise.all(promises);
+            const validResults = results.filter(r => typeof r === 'string' && r.length > 0);
+            if (validResults.length === 0) return "Error: All models failed to respond.";
+
+            const fusedOutput = validResults.join('\n---\n').trim();
+            if (fusedOutput === lastFusedOutput) {
+                converged = true;
+                this.proofTracker.proofCycle(true);
+            } else {
+                this.proofTracker.proofCycle(false);
+            }
+
+            lastFusedOutput = fusedOutput;
+            // Update the prompt for the next iteration with the output from the last cycle
+            currentPrompt = systemPrompt + this.initialPrompt + `\n\n[PREVIOUS ITERATION OUTPUT - Use this to improve the next output]\n${fusedOutput}`;
+            this.logEvent('CONSENSUS_LOOP', `Iteration ${i + 1}, Converged: ${converged}`);
+        }
+
+        return lastFusedOutput;
+    }
+
+    /**
+     * Extracts code blocks using regex.
+     */
+    parseCodeBlocks(content) {
+        return [...content.matchAll(/```(\w+)\s*([\s\S]*?)```/g)].map(match => ({
+            language: match[1].toLowerCase(),
+            code: match[2].trim(),
+        }));
+    }
+
+    /**
+     * Saves extracted code blocks to the filesystem and the blobs database.
+     */
+    async handleCodeGeneration(content) {
+        const blocks = this.parseCodeBlocks(content);
+        if (blocks.length === 0) return;
+
+        const projectName = this.options.project || `task_${this.taskId.substring(0, 8)}`;
+        const projectPath = path.join(PROJECTS_DIR, projectName);
+        fs.mkdirSync(projectPath, { recursive: true });
+
+        for (const [i, block] of blocks.entries()) {
+            const ext = this.getFileExtension(block.language);
+            const fileName = `${block.language}_${i}.${ext}`;
+            const filePath = path.join(projectPath, fileName);
+            fs.writeFileSync(filePath, block.code);
+            this.saveBlob(projectName, filePath, block.code);
+            console.log(`\x1b[32m[SUCCESS]\x1b[0m Generated file: ${filePath}`);
+        }
+
+        this.gitCommit(projectName);
+    }
+
+    /**
+     * Simple language to extension mapping.
+     */
+    getFileExtension(lang) {
+        return ({
+            python: 'py',
+            javascript: 'js',
+            html: 'html',
+            css: 'css',
+            php: 'php',
+            sql: 'sql',
+            bash: 'sh',
+            go: 'go'
+        })[lang] || 'txt';
+    }
+
+    /**
+     * Saves the prompt/response and proof state to the AI_DATA_DB.
+     */
+    saveMemory(prompt, response) {
+        const proofState = JSON.stringify(this.proofTracker.getState());
+        aiDataDb.run(
+            "INSERT INTO memories (task_id, prompt, response, proof_state) VALUES (?, ?, ?, ?)",
+            [this.taskId, prompt, response, proofState]
+        );
+    }
+
+    /**
+     * Saves file content to the BLOBS_DB.
+     */
+    saveBlob(proj, file, content) {
+        blobsDb.run(
+            "INSERT INTO blobs (project_name, file_path, content) VALUES (?, ?, ?)",
+            [proj, path.basename(file), content]
+        );
+    }
+
+    /**
+     * Logs events to the AI_DATA_DB.
+     */
+    logEvent(type, msg) {
+        aiDataDb.run(
+            "INSERT INTO events (event_type, message) VALUES (?, ?)",
+            [type, msg]
+        );
+    }
+
+    /**
+     * Commits the new project files to the AI_HOME git repository.
+     */
+    gitCommit(projectName) {
+        exec(`git -C ${AI_HOME} add . && git -C ${AI_HOME} commit -m "feat: AI project ${projectName}"`, (err, stdout, stderr) => {
+            if (err) this.logEvent('GIT_ERROR', `Failed to commit ${projectName}: ${stderr}`);
+            else this.logEvent('GIT_SUCCESS', `Committed project ${projectName}`);
+        });
+    }
+
+    /**
+     * Main execution lifecycle method.
+     */
+    async execute() {
+        this.logEvent('ORCHESTRATION_START', `Task ${this.taskId} started.`);
+        const finalOutput = await this.recursiveConsensus();
+        console.log("\n\x1b[1;36m--- Final Consensus Output ---\x1b[0m\n");
+        console.log(finalOutput);
+        this.saveMemory(this.initialPrompt, finalOutput);
+        await this.handleCodeGeneration(finalOutput);
+        this.logEvent('ORCHESTRATION_END', `Task ${this.taskId} finished.`);
+    }
 }
 
 // --- Main Execution ---
 (async () => {
+    // Parse arguments: prompt is everything not prefixed with '--'
     const args = process.argv.slice(2);
-    // The bash script sends the full prompt as a single argument string.
-    const prompt = args.join(' '); 
+    const prompt = args.filter(arg => !arg.startsWith('--')).join(' ');
     
-    if (!prompt) {
-        process.exit(0);
-    }
+    // Options are parsed from '--key=value' or '--key' flags
+    const options = Object.fromEntries(
+        args
+            .filter(arg => arg.startsWith('--'))
+            .map(arg => {
+                const parts = arg.slice(2).split('=');
+                return [parts[0], parts.length > 1 ? parts.slice(1).join('=') : true];
+            })
+    );
 
-    // Execution starts here
-    try {
-        const res = await runPrompt(prompt);
-        console.log(res.message || res);
-    } catch (err) {
-        console.error('An unhandled error occurred in the orchestrator:', err);
-    }
+    if (!prompt) process.exit(1);
 
+    const orchestrator = new AIOrchestrator(prompt, options);
+    await orchestrator.execute().finally(() => {
+        aiDataDb.close();
+        blobsDb.close();
+    });
 })();
 EOF_JS
 
 setup_environment() {
+    # Create all necessary persistent directories
     mkdir -p "$AI_HOME" "$TASKS_DIR" "$PROJECTS_DIR" "$DB_DIR" "$SSH_DIR" "$PLUGIN_DIR" "$LOG_DIR"
     
     # Write the Fused JavaScript Orchestrator (.mjs)
     echo "$JS_ORCHESTRATOR_CONTENT" > "$ORCHESTRATOR_FILE"
     echo "[INFO] Created persistent orchestrator file: $ORCHESTRATOR_FILE"
 
-    # Write the Python Webserver, Wallet, and Seed Manager (Unchanged from prompt)
+    # Write the Python Webserver, Wallet, and Seed Manager
     cat > "$AI_HOME/manager.py" << 'EOF'
 import http.server, socketserver, json, sqlite3, os, sys, argparse
 
@@ -315,6 +424,7 @@ if __name__ == "__main__":
 EOF
 
     # Initialize Databases
+    # Ensure tables exist for the new orchestrator's needs
     sqlite3 "$AI_DATA_DB" "CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, task_id TEXT, prompt TEXT, response TEXT, proof_state TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
     sqlite3 "$AI_DATA_DB" "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, event_type TEXT, message TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
     sqlite3 "$BLOBS_DB" "CREATE TABLE IF NOT EXISTS blobs (id INTEGER PRIMARY KEY, project_name TEXT, file_path TEXT, content BLOB, ts DATETIME DEFAULT CURRENT_TIMESTAMP);" &>/dev/null
@@ -329,24 +439,23 @@ EOF
 # Log an event to console and DB
 log_event() {
     echo "[\x1b[34m$1\x1b[0m] $(date): $2"
-    # Note: Using simple string concatenation for logging for simplicity, assuming input is trusted command output.
     sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$1', '$2');"
 }
 
 # Display help message
 show_help() {
-    echo "SysOp-AI: A self-contained AI orchestration framework."
+    echo "SysOp-AI: A self-contained AI orchestration framework (v3.0)."
     echo ""
     echo "USAGE:"
-    echo "  ai <prompt> [flags]   (Default: runs the prompt as a task)"
+    echo "  ai <prompt> [flags]   (Default: runs the prompt as a consensus task)"
     echo "  ai [COMMAND] [ARGUMENTS]"
     echo ""
     echo "DEFAULT BEHAVIOR (NEW ROUTING LOGIC):"
-    echo "  - Prompt contains '-': Direct execution via Ollama (Bypasses orchestrator)."
-    echo "  - Prompt contains NO '-': Routes through orchestrator (Allows 'instruct', 'think', patterns, and plugins)."
+    echo "  - Prompt contains '-': Direct execution via Ollama (Bypasses consensus loop)."
+    echo "  - Prompt contains NO '-': Routes through the Node.js consensus orchestrator."
     echo ""
     echo "COMMANDS:"
-    echo "  run <prompt>        Run an AI task loop with the given prompt."
+    echo "  run <prompt>        Run an AI task using multi-model consensus."
     echo "  import <url>        Pull external content to provide context for a run."
     echo "  memories            Show past AI prompts/responses."
     echo "  events              Show event logs."
@@ -361,19 +470,18 @@ show_help() {
     echo "  --help              Show this help message."
     echo ""
     echo "FLAGS FOR 'run' (and default prompt):"
-    echo "  --project=<name>    Assign a name to the project for generated files."
+    echo "  --project=<name>    Assign a name to the project for generated files (e.g., ai run 'create app' --project=my-app)."
 }
-
 
 # Helper function to run the orchestrator with session check
 run_ai_task() {
     local full_prompt="$*"
 
-    # 1. Hyphen Check: If prompt contains a hyphen, route directly to Ollama
+    # 1. Hyphen Check: If prompt contains a hyphen, route directly to Ollama (quick escape route)
     if [[ "$full_prompt" == *\-* ]]; then
         echo "[INFO] Prompt contains a hyphen ('$full_prompt'). Bypassing orchestrator and sending directly to Ollama."
         if command -v "$OLLAMA_BIN" &> /dev/null; then
-            # Run Ollama directly
+            # Run Ollama directly using llama3 as a default fast model
             "$OLLAMA_BIN" run llama3 "$full_prompt"
         else
             echo "[ERROR] Ollama command not found. Cannot execute hyphenated prompt directly."
@@ -391,14 +499,13 @@ run_ai_task() {
     fi
 
     log_event "TASK_START" "Prompt: $prompt"
-    # Ensure the orchestrator file exists before running
     if [ ! -f "$ORCHESTRATOR_FILE" ]; then
         log_event "ERROR" "Orchestrator file not found. Run 'ai status' or 'ai setup'."
         return
     fi
 
-    # Execute the Node.js orchestrator
-    node "$ORCHESTRATOR_FILE" "$prompt"
+    # Execute the Node.js orchestrator, passing the prompt and any flags
+    node "$ORCHESTRATOR_FILE" $prompt
     log_event "TASK_END" "Task finished."
 }
 
@@ -449,8 +556,8 @@ case "$COMMAND" in
         URL="$1"
         CONTENT=$(curl -sL "$URL")
         log_event "IMPORT" "Importing content from $URL"
-        echo "Import complete. Summarizing the content..."
-        run_ai_task "Summarize and analyze the following content: $CONTENT"
+        echo "Import complete. Sending content to consensus engine for analysis..."
+        run_ai_task "Analyze and summarize the following content, identifying all key technical requirements and entities: $CONTENT"
         ;;
     memories) sqlite3 -header -column "$AI_DATA_DB" "SELECT id, task_id, substr(prompt, 1, 40) as prompt, ts FROM memories ORDER BY ts DESC;" ;;
     events) sqlite3 -header -column "$AI_DATA_DB" "SELECT * FROM events ORDER BY ts DESC;" ;;
