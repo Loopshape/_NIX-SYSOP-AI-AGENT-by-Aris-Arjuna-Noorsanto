@@ -100,7 +100,8 @@ async function loadPlugins() {
     const files = fs.readdirSync(PLUGIN_DIR).filter(f => f.endsWith('.js'));
     for (const file of files) {
       try {
-        const plugin = (await import('file://' + path.join(PLUGIN_DIR, file))).default;
+        const absolutePath = path.resolve(PLUGIN_DIR, file);
+        const plugin = (await import('file://' + absolutePath)).default;
         if (typeof plugin === 'function') plugins.push(plugin);
       } catch {}
     }
