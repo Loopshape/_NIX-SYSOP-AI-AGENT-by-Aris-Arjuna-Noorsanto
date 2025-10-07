@@ -1,3 +1,23 @@
+#!/bin/env node
+
+// [Full AIOrchestrator class goes here]
+// orchestrator.mjs
+import { exec } from 'child_process';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import sqlite3Pkg from 'sqlite3';
+const { verbose } = sqlite3Pkg;
+const sqlite3 = verbose();
+
+const AI_HOME = process.env.AI_HOME;
+const PROJECTS_DIR = process.env.PROJECTS_DIR;
+const DB_DIR = process.env.DB_DIR;
+const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
+const MODEL_POOL = ["phi3", "llama3", "codegemma"];
+const aiDataDb = new sqlite3.Database(path.join(DB_DIR, "ai_data.db"));
+const blobsDb = new sqlite3.Database(path.join(DB_DIR, "blobs.db"));
+
 // Enhanced WebDev Code-Engine with Working Color Implementation
 import { exec } from 'child_process';
 import crypto from 'crypto';
@@ -6,11 +26,8 @@ import path from 'path';
 import sqlite3 from 'sqlite3';
 
 // Enhanced Environment
-const AI_HOME = process.env.AI_HOME;
-const PROJECTS_DIR = process.env.PROJECTS_DIR;
-const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
-const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
-const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
+const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'true';
+const SHOW_REASONING = process.env.SHOW_REASONING !== 'true';
 
 // Enhanced Model Pool for Web Development
 const WEB_DEV_MODELS = ["2244", "core", "loop", "coin", "code"];
@@ -403,3 +420,4 @@ User Task: `;
     const orchestrator = new WebDevOrchestrator(prompt, options);
     await orchestrator.execute();
 })();
+
