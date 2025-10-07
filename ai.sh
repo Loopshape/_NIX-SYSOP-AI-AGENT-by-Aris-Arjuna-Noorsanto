@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+<<<<<<< HEAD
 #
 # SysOp-AI: A Self-Contained AI Command-Line Application
 #
@@ -21,6 +22,112 @@
 #
 set -euo pipefail
 IFS=$'\n\t'
+=======
+set -euo pipefail
+
+# ============================================================================
+# AI Unified CLI Template
+# Combines Ollama analyzer, WebDev orchestrator, and prompt continuation.
+# ============================================================================
+OLLAMA_HOST="http://localhost:11434"
+DEFAULT_MODEL="codellama"
+AI_SESSION_FILE="$HOME/.ai_last_session.json"
+
+# --- ANSI colors & logging ---
+COLOR_RESET="\x1b[0m"; COLOR_YELLOW="\x1b[33m"
+COLOR_GREEN="\x1b[32m"; COLOR_CYAN="\x1b[36m"
+COLOR_RED="\x1b[31m";   COLOR_BLUE="\x1b[34m"
+
+log_info()  { echo -e "${COLOR_CYAN}[INFO] $1${COLOR_RESET}" >&2; }
+log_error() { echo -e "${COLOR_RED}[ERROR] $1${COLOR_RESET}" >&2; }
+
+# ============================================================================
+# SECTION 1: Ollama-style code analysis interface
+# (fill in your real call_ollama_api implementation here)
+# ============================================================================
+call_ollama_api() {
+    local MODEL="$1"; local PROMPT="$2"; local FILE="${3:-}"
+    log_info "Simulating API call to model '$MODEL'"
+    echo "[placeholder response from $MODEL for prompt: $PROMPT, file: $FILE]"
+}
+
+# ============================================================================
+# SECTION 2: WebDev orchestrator stub
+# (replace with your Node.js subprocess logic)
+# ============================================================================
+run_webdev_task() {
+    local PROMPT="$1"
+    log_info "Simulating WebDev orchestration for prompt: $PROMPT"
+    echo "[placeholder webdev output for: $PROMPT]"
+}
+
+# ============================================================================
+# SECTION 3: Session save / resume
+# ============================================================================
+save_session() {
+    local MODEL="$1"; local PROMPT="$2"; local RESPONSE="$3"
+    jq -n --arg model "$MODEL" --arg prompt "$PROMPT" --arg response "$RESPONSE" \
+       '{model:$model, prompt:$prompt, response:$response, timestamp:now}' \
+       > "$AI_SESSION_FILE"
+}
+
+continue_session() {
+    if [[ ! -f "$AI_SESSION_FILE" ]]; then
+        log_error "No previous session found."
+        exit 1
+    fi
+    local USER_PROMPT="$1"
+    local MODEL=$(jq -r '.model' "$AI_SESSION_FILE")
+    local CONTEXT=$(jq -r '.response' "$AI_SESSION_FILE")
+    local COMBINED_PROMPT="Previous context:\n${CONTEXT}\n\nUser continuation:\n${USER_PROMPT}"
+    call_ollama_api "$MODEL" "$COMBINED_PROMPT"
+}
+
+# ============================================================================
+# SECTION 4: Analyzer entry point
+# ============================================================================
+run_analyzer() {
+    local PROMPT="$1"; local SCRIPT_PATH="$2"; local MODEL="${3:-$DEFAULT_MODEL}"
+    local RESPONSE
+    RESPONSE=$(call_ollama_api "$MODEL" "$PROMPT" "$SCRIPT_PATH")
+    save_session "$MODEL" "$PROMPT" "$RESPONSE"
+}
+
+# ============================================================================
+# SECTION 5: CLI routing
+# ============================================================================
+show_help() {
+    echo -e "${COLOR_YELLOW}Usage:${COLOR_RESET}
+      ai dex 'prompt' /path/to/script.sh [model]
+      ai dev 'web project description'
+      ai prompt 'continue last conversation'"
+}
+
+case "${1:-}" in
+    dex)
+        [[ -z "${2:-}" || -z "${3:-}" ]] && { show_help; exit 1; }
+        run_analyzer "$2" "$3" "${4:-$DEFAULT_MODEL}"
+        ;;
+    dev)
+        [[ -z "${2:-}" ]] && { show_help; exit 1; }
+        run_webdev_task "$2"
+        ;;
+    prompt)
+        [[ -z "${2:-}" ]] && { show_help; exit 1; }
+        continue_session "$2"
+        ;;
+    *)
+        show_help
+        ;;
+esac
+
+// Enhanced WebDev Code-Engine with Working Color Implementation
+import { exec } from 'child_process';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import sqlite3 from 'sqlite3';
+>>>>>>> 051132d49003487fb706444860087269deb5a850
 
 # ==============================================================================
 # SECTION 1: CORE AI ENGINE & HELPERS (Largely Unchanged)
