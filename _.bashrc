@@ -265,3 +265,5 @@ if command -v jt >/dev/null 2>&1; then
 fi
 
 # ===============================================
+
+export PATH="$PATH:/home/loop/_"

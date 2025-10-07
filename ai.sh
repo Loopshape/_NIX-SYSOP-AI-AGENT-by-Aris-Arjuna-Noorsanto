@@ -298,7 +298,7 @@ const WEB_CONFIG_DB_PATH = process.env.WEB_CONFIG_DB;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 
 // Enhanced Model Pool for Web Development
-const WEB_DEV_MODELS = ["llama3.1:8b", "codellama:13b", "mistral:7b", "starling-lm:7b", "wizardcoder:15b"];
+const WEB_DEV_MODELS = ["2244", "core", "loop", "coin", "code"];
 
 // Framework-specific prompts
 const FRAMEWORK_PROMPTS = {
