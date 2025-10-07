@@ -34,7 +34,7 @@ export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
 
 # Verbose thinking configuration
 export VERBOSE_THINKING="${VERBOSE_THINKING:-true}"
-export THINKING_DELAY="${THINKING_DELAY:-0.12725125}"
+export THINKING_DELAY="${THINKING_DELAY:-0.5}"
 export SHOW_REASONING="${SHOW_REASONING:-true}"
 
 # --- Enhanced Status Function ---
@@ -383,7 +383,7 @@ const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 
 // Enhanced Model Pool for Web Development
-const WEB_DEV_MODELS = ["llama3.1:8b", "codellama:13b", "mistral:7b", "starling-lm:7b", "wizardcoder:15b"];
+const WEB_DEV_MODELS = ["2244", "loop", "core", "coin", "code"];
 
 // Framework-specific prompts
 const FRAMEWORK_PROMPTS = {
