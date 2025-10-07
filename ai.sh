@@ -9,7 +9,7 @@ set -euo pipefail
 # ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝     ╚══════╝
 #
 # WebDev Code-Engine with Verbose Thinking (Default)
-# Version: 4.1.0 (Verbose Thinking Enhanced)
+# Version: 4.1.1 (Fixed Function Ordering)
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -36,6 +36,56 @@ export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
 export VERBOSE_THINKING="${VERBOSE_THINKING:-true}"
 export THINKING_DELAY="${THINKING_DELAY:-0.5}"
 export SHOW_REASONING="${SHOW_REASONING:-true}"
+
+# --- Enhanced Status Function ---
+enhanced_status() {
+    echo -e "\n\x1b[1;36m🌐 WEBDEV AI CODE ENGINE STATUS\x1b[0m"
+    echo -e "\x1b[90m==========================================\x1b[0m"
+    echo "AI_HOME: $AI_HOME"
+    echo "Projects: $(ls -1 "$PROJECTS_DIR" 2>/dev/null | wc -l) created"
+    echo "Active Session: $([ -f "$SESSION_FILE" ] && cat "$SESSION_FILE" || echo "None")"
+    echo "Verbose Thinking: $VERBOSE_THINKING"
+    echo "Show Reasoning: $SHOW_REASONING"
+    
+    # Check if dependencies are available
+    echo -e "\n\x1b[1;34m🔧 DEPENDENCIES:\x1b[0m"
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    for dep in "${deps[@]}"; do
+        if command -v "$dep" &> /dev/null; then
+            echo "  ✅ $dep"
+        else
+            echo "  ❌ $dep"
+        fi
+    done
+    
+    # Show recent projects
+    echo -e "\n\x1b[1;35m📁 RECENT PROJECTS:\x1b[0m"
+    if [ -f "$WEB_CONFIG_DB" ]; then
+        sqlite3 "$WEB_CONFIG_DB" "SELECT name, framework, status, datetime(ts) FROM projects ORDER BY ts DESC LIMIT 5;" 2>/dev/null | while IFS='|' read name framework status timestamp; do
+            echo "  🗂️  $name ($framework) - $status"
+            echo "     📅 $timestamp"
+        done || echo "  No projects yet"
+    else
+        echo "  No projects database found"
+    fi
+    
+    # Show system stats
+    echo -e "\n\x1b[1;32m📊 SYSTEM STATS:\x1b[0m"
+    if [ -f "$AI_DATA_DB" ]; then
+        local total_tasks=$(sqlite3 "$AI_DATA_DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo "0")
+        local total_events=$(sqlite3 "$AI_DATA_DB" "SELECT COUNT(*) FROM events;" 2>/dev/null || echo "0")
+        echo "  Total Tasks: $total_tasks"
+        echo "  Total Events: $total_events"
+    fi
+    
+    # Show disk usage
+    if [ -d "$AI_HOME" ]; then
+        local disk_usage=$(du -sh "$AI_HOME" 2>/dev/null | cut -f1)
+        echo "  Disk Usage: $disk_usage"
+    fi
+    
+    echo -e "\n\x1b[1;33m💡 TIP: Use '--verbose' to toggle thinking mode, '--quiet' for silent mode\x1b[0m"
+}
 
 # --- Enhanced Logging with Verbose Support ---
 log_event() {
@@ -77,7 +127,7 @@ show_reasoning() {
     local reasoning="$1"
     local context="$2"
     
-    if [ "$SHOW_REASONING" = "true" ]; then
+    if [ "$SHOW_REASONING" = "true" ] && [ -n "$reasoning" ]; then
         echo -e "\n\x1b[33m💭 REASONING [$context]:\x1b[0m"
         echo -e "\x1b[90m$reasoning\x1b[0m"
         echo -e "\x1b[33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n"
@@ -260,6 +310,48 @@ CREATE TABLE IF NOT EXISTS api_endpoints (
 SQL
 
     log_event "SUCCESS" "Enhanced databases initialized"
+}
+
+# --- Web Development Templates ---
+setup_web_templates() {
+    log_event "INFO" "Setting up web development templates..."
+    mkdir -p "$TEMPLATES_DIR"
+    
+    # React Component Template
+    cat > "$TEMPLATES_DIR/react_component.jsx" <<'REACT'
+import React from 'react';
+import './{{componentName}}.css';
+
+const {{componentName}} = ({ {{props}} }) => {
+    return (
+        <div className="{{componentName}}">
+            {/* Component content */}
+        </div>
+    );
+};
+
+export default {{componentName}};
+REACT
+
+    # Express API Template
+    cat > "$TEMPLATES_DIR/express_api.js" <<'EXPRESS'
+const express = require('express');
+const router = express.Router();
+
+// {{routeDescription}}
+router.{{method}}('{{routePath}}', async (req, res) => {
+    try {
+        // Implementation here
+        res.json({ success: true, data: {} });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+module.exports = router;
+EXPRESS
+
+    log_event "SUCCESS" "Web development templates installed"
 }
 
 # --- Enhanced Orchestrator with Verbose Thinking ---
@@ -592,8 +684,162 @@ User Task: `;
         return bestOutput;
     }
 
-    // ... (rest of the methods like getFileEnhancedExtension, parseEnhancedCodeBlocks, etc. remain the same)
-    // [Previous implementation of file handling, code generation, etc.]
+    // Enhanced file type detection
+    getFileEnhancedExtension(language, framework) {
+        const extensions = {
+            javascript: framework === 'react' ? 'jsx' : 'js',
+            typescript: framework === 'react' ? 'tsx' : 'ts',
+            python: 'py',
+            html: 'html',
+            css: 'css',
+            php: 'php',
+            sql: 'sql',
+            bash: 'sh',
+            docker: 'Dockerfile',
+            nginx: 'conf',
+            json: 'json'
+        };
+        return extensions[language] || 'txt';
+    }
+
+    parseEnhancedCodeBlocks(content) {
+        const regex = /```(\w+)\s*([\s\S]*?)```/g;
+        const blocks = [];
+        let match;
+        
+        while ((match = regex.exec(content)) !== null) {
+            const language = match[1];
+            let code = match[2].trim();
+            
+            // Remove language specification from the first line if present
+            if (code.startsWith(match[1])) {
+                code = code.substring(match[1].length).trim();
+            }
+            
+            blocks.push({ 
+                language: language, 
+                code: code,
+                framework: this.detectBlockFramework(code, language)
+            });
+        }
+        
+        // If no code blocks found, treat entire content as a file
+        if (blocks.length === 0 && content.trim().length > 0) {
+            blocks.push({
+                language: 'javascript',
+                code: content.trim(),
+                framework: this.detectedFrameworks[0] || 'node'
+            });
+        }
+        
+        return blocks;
+    }
+
+    detectBlockFramework(code, language) {
+        if (language === 'jsx' || code.includes('import React') || code.includes('export default function')) {
+            return 'react';
+        }
+        if (code.includes('const express = require') || code.includes('app.get') || code.includes('app.post')) {
+            return 'node';
+        }
+        if (code.includes('from flask import') || code.includes('@app.route')) {
+            return 'python';
+        }
+        return this.detectedFrameworks[0] || 'node';
+    }
+
+    async handleEnhancedCodeGeneration(content) {
+        const blocks = this.parseEnhancedCodeBlocks(content);
+        if (!blocks.length) return;
+
+        const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
+        const projectPath = path.join(PROJECTS_DIR, project);
+        
+        // Create project structure
+        const dirs = ['src', 'public', 'api', 'components', 'styles', 'config'];
+        dirs.forEach(dir => fs.mkdirSync(path.join(projectPath, dir), { recursive: true }));
+
+        // Create package.json for Node projects
+        if (this.detectedFrameworks.includes('node') || this.detectedFrameworks.includes('react')) {
+            const packageJson = {
+                name: project,
+                version: "1.0.0",
+                scripts: {
+                    dev: "next dev" || "node server.js",
+                    build: "next build",
+                    start: "next start" || "node server.js"
+                },
+                dependencies: {}
+            };
+            fs.writeFileSync(path.join(projectPath, 'package.json'), JSON.stringify(packageJson, null, 2));
+        }
+
+        // Generate files from code blocks
+        for (const [i, block] of blocks.entries()) {
+            const ext = this.getFileEnhancedExtension(block.language, block.framework);
+            const fileName = `file_${i}.${ext}`;
+            const filePath = path.join(projectPath, fileName);
+            
+            fs.writeFileSync(filePath, block.code);
+            this.saveBlob(project, filePath, block.code);
+            console.log(chalk.green(`[SUCCESS] Generated: ${filePath}`));
+        }
+
+        this.registerProject(project);
+        this.gitCommit(project);
+        
+        console.log(chalk.cyan(`\n🎉 Project ${project} created successfully!`));
+        console.log(chalk.cyan(`📁 Location: ${projectPath}`));
+    }
+
+    // Enhanced persistence methods
+    saveMemory(prompt, response) {
+        const db = new sqlite3.Database(AI_DATA_DB_PATH);
+        db.run(
+            `INSERT INTO memories (task_id, prompt, response, proof_state, framework, complexity) VALUES (?, ?, ?, ?, ?, ?)`,
+            [this.taskId, prompt, response, JSON.stringify(this.proofTracker.getState()), this.detectedFrameworks.join(','), this.proofTracker.complexityScore],
+            err => { if (err) console.error(chalk.red('DB Error:'), err); db.close(); }
+        );
+    }
+
+    saveBlob(project, file, content) {
+        const db = new sqlite3.Database(BLOBS_DB_PATH);
+        const fileType = path.extname(file).substring(1);
+        db.run(
+            `INSERT INTO blobs (project_name, file_path, content, file_type, framework) VALUES (?, ?, ?, ?, ?)`,
+            [project, path.basename(file), content, fileType, this.detectedFrameworks.join(',')],
+            err => { if (err) console.error(chalk.red('DB Error:'), err); db.close(); }
+        );
+    }
+
+    registerProject(projectName) {
+        const db = new sqlite3.Database(WEB_CONFIG_DB_PATH);
+        db.run(
+            `INSERT OR REPLACE INTO projects (name, framework, port, status) VALUES (?, ?, ?, ?)`,
+            [projectName, this.detectedFrameworks.join(','), 3000, 'created'],
+            err => { if (err) console.error(chalk.red('Project registration error:'), err); db.close(); }
+        );
+    }
+
+    logEvent(type, msg) {
+        const db = new sqlite3.Database(AI_DATA_DB_PATH);
+        db.run(
+            `INSERT INTO events (event_type, message) VALUES (?, ?)`,
+            [type, msg],
+            err => { if (err) console.error(chalk.red('Event logging error:'), err); db.close(); }
+        );
+    }
+
+    gitCommit(project) {
+        const projectPath = path.join(PROJECTS_DIR, project);
+        if (!fs.existsSync(path.join(projectPath, '.git'))) {
+            const cmd = `cd ${projectPath} && git init && git add . && git commit -m "feat: Initial web app generated by WebDev AI"`;
+            exec(cmd, (err) => {
+                if (err) this.logEvent('GIT_ERROR', `Failed to commit ${project}`);
+                else this.logEvent('GIT_SUCCESS', `Committed ${project}`);
+            });
+        }
+    }
 
     async execute() {
         think("Starting WebDev AI execution...", 0);
