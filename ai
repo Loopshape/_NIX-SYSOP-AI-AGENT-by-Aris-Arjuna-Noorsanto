@@ -48,10 +48,9 @@ export PROOF_TASK_ID=""
 declare -A MODEL_WEIGHTS
 DEFAULT_POOL_MODELS=("2244:latest" "core:latest" "loop:latest" "coin:latest" "code:latest")
 MODEL_WEIGHTS=( ["2244:latest"]=2 ["core:latest"]=2 ["loop:latest"]=1 ["coin:latest"]=1 ["code:latest"]=2 )
-# This global will be dynamically overwritten by the new logic
 POOL_MODELS=("${DEFAULT_POOL_MODELS[@]}")
 
-# -------------------- Core Initializer (## MODIFIED ##) --------------------
+# -------------------- Core Initializer --------------------
 _initialize_env() {
     thinking "Initializing environment and databases..." 0
     mkdir -p "$AI_HOME" "$TASKS_DIR"
@@ -69,7 +68,6 @@ CREATE TABLE IF NOT EXISTS reasoning_chains (
     id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, step INTEGER,
     reasoning TEXT, context TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP
 );
--- ## NEW TABLE ##: To track which models were used for which task ID
 CREATE TABLE IF NOT EXISTS model_usage (
     task_id TEXT NOT NULL,
     model_name TEXT NOT NULL,
@@ -108,7 +106,7 @@ COLOR_MAGENTA='\x1b[35m'
 COLOR_CYAN='\x1b[36m'
 COLOR_GRAY='\x1b[90m'
 
-# -------------------- Enhanced Logging & Thinking --------------------
+# -------------------- Enhanced Logging & Thinking (## HARDENED ##) --------------------
 log_event() {
     local level="$1" message="$2" metadata="${3:-}" color="$COLOR_CYAN"
     case "$level" in
@@ -117,8 +115,11 @@ log_event() {
         "DEBUG") color="$COLOR_MAGENTA" ;;
     esac
     echo -e "[$color$level$COLOR_RESET] $(date +%H:%M:%S): $message"
-    message=$(sed "s/'/''/g" <<< "$message"); metadata=$(sed "s/'/''/g" <<< "$metadata")
-    sqlite3 "$AI_DB" "INSERT INTO events (event_type, message, metadata) VALUES ('$level', '$message', '$metadata');" 2>/dev/null || true
+    local message_esc=$(sed "s/'/''/g" <<< "$message")
+    local metadata_esc=$(sed "s/'/''/g" <<< "$metadata")
+    sqlite3 "$AI_DB" <<EOF || true
+INSERT INTO events (event_type, message, metadata) VALUES ('$level', '$message_esc', '$metadata_esc');
+EOF
 }
 
 thinking() {
@@ -138,7 +139,9 @@ show_reasoning() {
         echo -e "${COLOR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$COLOR_RESET\n"
         local escaped_reasoning=$(sed "s/'/''/g" <<< "$reasoning")
         local escaped_context=$(sed "s/'/''/g" <<< "$context")
-        sqlite3 "$AI_DB" "INSERT INTO reasoning_chains (task_id, step, reasoning, context) VALUES ('$PROOF_TASK_ID', $PROOF_CYCLE_INDEX, '$escaped_reasoning', '$escaped_context');" 2>/dev/null || true
+        sqlite3 "$AI_DB" <<EOF || true
+INSERT INTO reasoning_chains (task_id, step, reasoning, context) VALUES ('$PROOF_TASK_ID', $PROOF_CYCLE_INDEX, '$escaped_reasoning', '$escaped_context');
+EOF
     fi
 }
 
@@ -180,7 +183,7 @@ proof_cycle() {
     show_reasoning "$reasoning. Cycle $PROOF_CYCLE_INDEX. Net Worth: $PROOF_NET_WORTH_INDEX." "Proof Cycle Update"
 }
 
-# -------------------- Helpers (Updated) --------------------
+# -------------------- Helpers (Updated & ## HARDENED ##) --------------------
 add_memory_enhanced() {
     local prompt_esc=$(sed "s/'/''/g" <<< "$1") response_esc=$(sed "s/'/''/g" <<< "$2")
     local proof_state_esc=$(sed "s/'/''/g" <<< "$3") framework_esc=$(sed "s/'/''/g" <<< "$4")
@@ -193,7 +196,14 @@ VALUES (
 );
 EOF
 }
-add_blob() { sqlite3 "$BLOBS_DB" "INSERT INTO blobs (filename,content) VALUES ('$1','$(sed "s/'/''/g" <<< "$2")');"; }
+
+add_blob() {
+    local filename_esc=$(sed "s/'/''/g" <<< "$1")
+    local content_esc=$(sed "s/'/''/g" <<< "$2")
+    sqlite3 "$BLOBS_DB" <<EOF
+INSERT INTO blobs (filename, content) VALUES ('$filename_esc', '$content_esc');
+EOF
+}
 run_ollama_json() { "$OLLAMA_BIN" run "$1" --format=json --keepalive=3200m "$2"; }
 gen_task_id() { echo -n "${1:-}$(date +%s%N)$RANDOM" | sha256sum | cut -c1-16; }
 
@@ -206,26 +216,19 @@ highlight_file() {
     fi
 }
 
-# -------------------- ## NEW ## Dynamic Model Selection --------------------
+# -------------------- Dynamic Model Selection (## HARDENED ##) --------------------
 _select_dynamic_models() {
-    local framework="$1"
-    local complexity="$2"
-    local POOL_SIZE=3 # Select the top 3 models for the task
-
+    local framework="$1" complexity="$2" POOL_SIZE=3
     thinking "Selecting dynamic model pool for task..." 1
-    
     local available_models
     mapfile -t available_models < <("$OLLAMA_BIN" list | awk 'NR>1 {print $1}')
-    
     if [[ ${#available_models[@]} -eq 0 ]]; then
         log_event "ERROR" "No Ollama models found. Please run 'ollama pull <model>'."
-        POOL_MODELS=("${DEFAULT_POOL_MODELS[@]}") # Fallback
+        POOL_MODELS=("${DEFAULT_POOL_MODELS[@]}")
         return
     fi
-
     declare -A model_scores
     local reasoning_text="Scoring available models based on historical performance:\n"
-
     for model in "${available_models[@]}"; do
         local query="
             SELECT SUM(
@@ -239,19 +242,16 @@ _select_dynamic_models() {
             WHERE T2.model_name = '${model}' AND T1.framework LIKE '%${framework}%';
         "
         local score
-        score=$(sqlite3 "$AI_DB" "$query" 2>/dev/null)
-        model_scores["$model"]=${score:-0} # Default to 0 if no history
+        # Use a "here string" to pipe the query, avoiding argument length limits.
+        score=$(sqlite3 "$AI_DB" <<< "$query" 2>/dev/null)
+        model_scores["$model"]=${score:-0}
         reasoning_text+="  - Model: ${model}, Score: ${model_scores[$model]}\n"
     done
-
-    # Sort models by score and select the top N
     local sorted_models_str
     sorted_models_str=$(for model in "${!model_scores[@]}"; do
         printf "%s %s\n" "${model_scores[$model]}" "$model"
     done | sort -rn | head -n "$POOL_SIZE" | awk '{print $2}')
-
     mapfile -t POOL_MODELS < <(echo "$sorted_models_str")
-
     if [[ ${#POOL_MODELS[@]} -lt $POOL_SIZE ]] && [[ ${#POOL_MODELS[@]} -lt ${#available_models[@]} ]]; then
         reasoning_text+="\nNot enough historical data; filling pool with other available models.\n"
         for model in "${available_models[@]}"; do
@@ -261,7 +261,6 @@ _select_dynamic_models() {
             fi
         done
     fi
-    
     reasoning_text+="\nSelected dynamic pool for this run: ${POOL_MODELS[*]}"
     show_reasoning "$reasoning_text" "Dynamic Model Selection"
 }
@@ -291,31 +290,22 @@ _run_consensus_iteration() {
     echo "$fused_output"
 }
 
-# -------------------- AI Loop (The 'run' command's core - ## MODIFIED ##) --------------------
+# -------------------- AI Loop (The 'run' command's core) --------------------
 run_ai_loop() {
     local initial_prompt="$1" FORCE_EDIT="${FORCE_EDIT:-false}"
     local IMPORT_URLS=("${IMPORT_URLS[@]:-}") MAX_LOOPS=3
-    
-    # --- Initialization and Context Setup ---
     PROOF_TASK_ID=$(gen_task_id "$initial_prompt")
     PROOF_CYCLE_INDEX=0; PROOF_NET_WORTH_INDEX=0
     local current_context="$initial_prompt" last_fused_output="" converged=0
-    
     detect_frameworks "$initial_prompt"; calculate_complexity "$initial_prompt"
     log_event "TASK_START" "Prompt: $initial_prompt" "TaskID: $PROOF_TASK_ID, Complexity: $PROOF_COMPLEXITY, Frameworks: $PROOF_FRAMEWORKS"
-    
-    # --- ## NEW ##: DYNAMICALLY SELECT MODELS ---
     _select_dynamic_models "$PROOF_FRAMEWORKS" "$PROOF_COMPLEXITY"
-
     if [[ ${#IMPORT_URLS[@]} -gt 0 ]]; then
         thinking "Importing URLs into context..." 1
         for url in "${IMPORT_URLS[@]}"; do _cmd_import "$url"; done
     fi
-    
     echo -e "\n${COLOR_BRIGHT}${COLOR_MAGENTA}🎯 STARTING AI LOOP (Task ID: $PROOF_TASK_ID)$COLOR_RESET"
     echo -e "${COLOR_GRAY}Complexity: $PROOF_COMPLEXITY | Target: $PROOF_FRAMEWORKS | Dynamic Pool: ${POOL_MODELS[*]}$COLOR_RESET\n"
-    
-    # --- Recursive Consensus Loop ---
     for ((i=1; i<=MAX_LOOPS; i++)); do
         echo -e "\n${COLOR_CYAN}[AI LOOP $i/$MAX_LOOPS]$COLOR_RESET"
         thinking "Running consensus iteration $i..." 1
@@ -333,17 +323,11 @@ run_ai_loop() {
         last_fused_output="$consensus_output"
         current_context="$initial_prompt"$'\n\n'"--- Previous Consensus Output for Refinement ---"$'\n'"$consensus_output"
     done
-    
-    # --- Finalization and Logging ---
     thinking "Finalizing task and generating artifacts..." 1
     local final_content="$last_fused_output"
     local final_state=$([[ "$converged" == 1 ]] && echo "CONVERGED" || echo "MAX_LOOPS_REACHED")
     log_event "TASK_END" "Task finished with state: $final_state" "NetWorth: $PROOF_NET_WORTH_INDEX"
-    
-    # --- ## NEW ##: Log which models were used for this task for future learning ---
     _update_model_usage
-
-    # --- Artifact Generation (Unchanged) ---
     local file_type="default_web_triad" main_content="$final_content"
     local base_filename="$TASKS_DIR/task_${PROOF_TASK_ID}" primary_file_path=""
     if [[ "$final_content" =~ ^GENERATE_FILE: ]]; then
