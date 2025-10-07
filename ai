@@ -50,7 +50,7 @@ enhanced_status() {
     # Check if dependencies are available
     echo -e "\n\x1b[1;34m🔧 DEPENDENCIES:\x1b[0m"
     local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
-    for dep in "${deps[@]}"; do
+    for dep in "$({deps[@]})"; do
         if command -v "$dep" &> /dev/null; then
             echo "  ✅ $dep"
         else
