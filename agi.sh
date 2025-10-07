@@ -1,3 +1,357 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ███████╗██╗   ██╗███████╗ ██████╗ ██████╗ █████╗ ██╗    ██████╗ ██████╗ ██████╗ ███████╗
+# ██╔════╝╚██╗ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║    ██╔══██╗██╔══██╗██╔══██╗██╔════╝
+# ███████╗ ╚████╔╝ █████╗  ██║   ██║██████╔╝███████║██║    ██║  ██║██████╔╝██████╔╝█████╗  
+# ╚════██║  ╚██╔╝  ██╔══╝  ██║   ██║██╔═══╝ ██╔══██║██║    ██║  ██║██╔═══╝ ██╔═══╝ ██╔══╝  
+# ███████║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██████╔╝██║     ██║     ███████╗
+# ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝     ╚══════╝
+#
+# WebDev Code-Engine with Verbose Thinking (Fixed Colors)
+# Version: 4.1.3 (Working Color Implementation)
+
+# --- Enhanced Environment & Configuration ---
+export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
+export ENV_HOME="${ENV_HOME:-$HOME/.webdev_ai_env}"
+export NODE_MODULES="$AI_HOME/node_modules"
+export PLUGIN_DIR="$AI_HOME/plugins"
+export LOG_DIR="$AI_HOME/ollama_logs"
+export ORCHESTRATOR_FILE="$AI_HOME/orchestrator.mjs"
+export TASKS_DIR="$AI_HOME/tasks"
+export PROJECTS_DIR="$AI_HOME/projects"
+export DB_DIR="$AI_HOME/db"
+export SSH_DIR="$AI_HOME/ssh"
+export TEMPLATES_DIR="$AI_HOME/templates"
+export SCRIPTS_DIR="$AI_HOME/scripts"
+export AI_DATA_DB="$DB_DIR/ai_data.db"
+export BLOBS_DB="$DB_DIR/blobs.db"
+export WALLET_DB="$DB_DIR/wallet.db"
+export WEB_CONFIG_DB="$DB_DIR/web_config.db"
+export SESSION_FILE="$AI_HOME/.session"
+export OLLAMA_BIN="ollama"
+export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
+
+# Verbose thinking configuration
+export VERBOSE_THINKING="${VERBOSE_THINKING:-true}"
+export THINKING_DELAY="${THINKING_DELAY:-0.5}"
+export SHOW_REASONING="${SHOW_REASONING:-true}"
+
+# --- Enhanced Status Function ---
+enhanced_status() {
+    echo -e "\n\x1b[1;36m🌐 WEBDEV AI CODE ENGINE STATUS\x1b[0m"
+    echo -e "\x1b[90m==========================================\x1b[0m"
+    echo "AI_HOME: $AI_HOME"
+    echo "Projects: $(ls -1 "$PROJECTS_DIR" 2>/dev/null | wc -l) created"
+    echo "Active Session: $([ -f "$SESSION_FILE" ] && cat "$SESSION_FILE" || echo "None")"
+    echo "Verbose Thinking: $VERBOSE_THINKING"
+    echo "Show Reasoning: $SHOW_REASONING"
+    
+    # Check if dependencies are available
+    echo -e "\n\x1b[1;34m🔧 DEPENDENCIES:\x1b[0m"
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    for dep in "${deps[@]}"; do
+        if command -v "$dep" &> /dev/null; then
+            echo "  ✅ $dep"
+        else
+            echo "  ❌ $dep"
+        fi
+    done
+    
+    # Check Node modules
+    echo -e "\n\x1b[1;35m📦 NODE MODULES:\x1b[0m"
+    local node_modules=("sqlite3")
+    for module in "${node_modules[@]}"; do
+        if [ -d "$NODE_MODULES/$module" ]; then
+            echo "  ✅ $module"
+        else
+            echo "  ❌ $module"
+        fi
+    done
+    
+    # Show recent projects
+    echo -e "\n\x1b[1;35m📁 RECENT PROJECTS:\x1b[0m"
+    if [ -f "$WEB_CONFIG_DB" ]; then
+        sqlite3 "$WEB_CONFIG_DB" "SELECT name, framework, status, datetime(ts) FROM projects ORDER BY ts DESC LIMIT 5;" 2>/dev/null | while IFS='|' read name framework status timestamp; do
+            echo "  🗂️  $name ($framework) - $status"
+            echo "     📅 $timestamp"
+        done || echo "  No projects yet"
+    else
+        echo "  No projects database found"
+    fi
+    
+    # Show system stats
+    echo -e "\n\x1b[1;32m📊 SYSTEM STATS:\x1b[0m"
+    if [ -f "$AI_DATA_DB" ]; then
+        local total_tasks=$(sqlite3 "$AI_DATA_DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo "0")
+        local total_events=$(sqlite3 "$AI_DATA_DB" "SELECT COUNT(*) FROM events;" 2>/dev/null || echo "0")
+        echo "  Total Tasks: $total_tasks"
+        echo "  Total Events: $total_events"
+    fi
+    
+    # Show disk usage
+    if [ -d "$AI_HOME" ]; then
+        local disk_usage=$(du -sh "$AI_HOME" 2>/dev/null | cut -f1)
+        echo "  Disk Usage: $disk_usage"
+    fi
+    
+    echo -e "\n\x1b[1;33m💡 TIP: Use '--verbose' to toggle thinking mode, '--quiet' for silent mode\x1b[0m"
+}
+
+# --- Enhanced Logging with Verbose Support ---
+log_event() {
+    local level="$1"
+    local message="$2"
+    local color=""
+    
+    case "$level" in
+        "ERROR") color="\x1b[31m" ;;
+        "WARN") color="\x1b[33m" ;;
+        "SUCCESS") color="\x1b[32m" ;;
+        "INFO") color="\x1b[34m" ;;
+        "DEBUG") color="\x1b[35m" ;;
+        "THINKING") color="\x1b[36m" ;;
+        *) color="\x1b[36m" ;;
+    esac
+    
+    echo "[${color}${level}\x1b[0m] $(date): $message"
+    sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$level', '$message');" 2>/dev/null || true
+}
+
+# --- Thinking Animation and Verbose Output ---
+thinking() {
+    local message="$1"
+    local depth="${2:-0}"
+    local indent=""
+    
+    for ((i=0; i<depth; i++)); do
+        indent+="  "
+    done
+    
+    if [ "$VERBOSE_THINKING" = "true" ]; then
+        echo -e "${indent}🤔 \x1b[36mTHINKING\x1b[0m: $message"
+        sleep "$THINKING_DELAY"
+    fi
+}
+
+show_reasoning() {
+    local reasoning="$1"
+    local context="$2"
+    
+    if [ "$SHOW_REASONING" = "true" ] && [ -n "$reasoning" ]; then
+        echo -e "\n\x1b[33m💭 REASONING [$context]:\x1b[0m"
+        echo -e "\x1b[90m$reasoning\x1b[0m"
+        echo -e "\x1b[33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n"
+    fi
+}
+
+# --- Fixed Dependency Installation ---
+install_node_modules() {
+    thinking "Installing Node.js modules..." 1
+    
+    # Create package.json if it doesn't exist
+    if [ ! -f "$AI_HOME/package.json" ]; then
+        cat > "$AI_HOME/package.json" << 'PKG_JSON'
+{
+  "name": "webdev-ai-orchestrator",
+  "version": "1.0.0",
+  "description": "WebDev AI Code Engine Orchestrator",
+  "type": "module",
+  "dependencies": {
+    "sqlite3": "^5.1.6"
+  }
+}
+PKG_JSON
+    fi
+    
+    # Install modules directly in AI_HOME
+    thinking "Running npm install in $AI_HOME..." 2
+    cd "$AI_HOME"
+    
+    # Install sqlite3 only (we'll use native console for colors)
+    if [ ! -d "$NODE_MODULES/sqlite3" ]; then
+        thinking "Installing sqlite3..." 3
+        npm install sqlite3 --save --loglevel=error
+        if [ $? -eq 0 ]; then
+            log_event "SUCCESS" "Installed sqlite3"
+        else
+            log_event "ERROR" "Failed to install sqlite3"
+        fi
+    fi
+    
+    # Verify installation
+    thinking "Verifying module installation..." 2
+    if [ -d "$NODE_MODULES/sqlite3" ]; then
+        thinking "✅ sqlite3 installed successfully" 3
+    else
+        thinking "❌ sqlite3 failed to install" 3
+        log_event "ERROR" "Module sqlite3 not found after installation"
+    fi
+    
+    cd - > /dev/null
+}
+
+check_node_modules() {
+    thinking "Checking Node.js modules..." 1
+    
+    if [ ! -d "$NODE_MODULES/sqlite3" ]; then
+        thinking "sqlite3 module missing, installing..." 2
+        install_node_modules
+    else
+        thinking "All Node.js modules are installed" 2
+    fi
+}
+
+check_dependencies() {
+    thinking "Checking system dependencies..." 1
+    local missing_deps=()
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    check_node_modules
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        log_event "ERROR" "Missing dependencies: ${missing_deps[*]}"
+        echo "Please install missing dependencies: ${missing_deps[*]}"
+        exit 1
+    fi
+    
+    log_event "SUCCESS" "All dependencies satisfied"
+}
+
+# Web Development Framework Detection
+detect_frameworks() {
+    local project_path="${1:-$PWD}"
+    local frameworks=()
+    
+    thinking "Detecting frameworks in: $project_path" 1
+    
+    [ -f "$project_path/package.json" ] && frameworks+=("nodejs")
+    [ -f "$project_path/requirements.txt" ] && frameworks+=("python")
+    [ -f "$project_path/composer.json" ] && frameworks+=("php")
+    [ -f "$project_path/go.mod" ] && frameworks+=("go")
+    [ -f "$project_path/Cargo.toml" ] && frameworks+=("rust")
+    [ -f "$project_path/Gemfile" ] && frameworks+=("ruby")
+    [ -d "$project_path/.next" ] && frameworks+=("nextjs")
+    [ -f "$project_path/nuxt.config.js" ] || [ -f "$project_path/nuxt.config.ts" ] && frameworks+=("nuxtjs")
+    [ -f "$project_path/vue.config.js" ] && frameworks+=("vue")
+    [ -f "$project_path/angular.json" ] && frameworks+=("angular")
+    [ -f "$project_path/react-native.config.js" ] && frameworks+=("react-native")
+    
+    show_reasoning "Detected frameworks: ${frameworks[*]}" "Framework Detection"
+    echo "${frameworks[@]}"
+}
+
+# --- Enhanced Database Initialization ---
+init_databases() {
+    thinking "Initializing databases..." 1
+    mkdir -p "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR"
+
+    # Enhanced ai_data.db
+    sqlite3 "$AI_DATA_DB" <<SQL 2>/dev/null
+CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
+    prompt TEXT,
+    response TEXT,
+    proof_state TEXT,
+    framework TEXT,
+    complexity INTEGER DEFAULT 1,
+    reasoning_log TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT,
+    message TEXT,
+    metadata TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS web_components (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    type TEXT,
+    framework TEXT,
+    code TEXT,
+    dependencies TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS reasoning_chains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
+    step INTEGER,
+    reasoning TEXT,
+    context TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+SQL
+
+    # Enhanced blobs.db
+    sqlite3 "$BLOBS_DB" <<SQL 2>/dev/null
+CREATE TABLE IF NOT EXISTS blobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_name TEXT,
+    file_path TEXT,
+    content BLOB,
+    file_type TEXT,
+    framework TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS scripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    type TEXT,
+    code TEXT,
+    description TEXT,
+    usage_count INTEGER DEFAULT 0,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+SQL
+
+    # Web configuration database
+    sqlite3 "$WEB_CONFIG_DB" <<SQL 2>/dev/null
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE,
+    framework TEXT,
+    port INTEGER,
+    domain TEXT,
+    status TEXT DEFAULT 'inactive',
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS deployments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_name TEXT,
+    environment TEXT,
+    status TEXT,
+    url TEXT,
+    logs TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS api_endpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_name TEXT,
+    method TEXT,
+    path TEXT,
+    handler TEXT,
+    middleware TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+SQL
+
+    log_event "SUCCESS" "Enhanced databases initialized"
+}
+
+# --- Fixed Orchestrator with Working Colors ---
+setup_orchestrator() {
+    log_event "INFO" "Setting up enhanced orchestrator with working colors..."
+    mkdir -p "$AI_HOME"
+    cat > "$ORCHESTRATOR_FILE" <<'EOF_JS'
 // Enhanced WebDev Code-Engine with Working Color Implementation
 import { exec } from 'child_process';
 import crypto from 'crypto';
@@ -403,3 +757,137 @@ User Task: `;
     const orchestrator = new WebDevOrchestrator(prompt, options);
     await orchestrator.execute();
 })();
+EOF_JS
+
+    log_event "SUCCESS" "Enhanced orchestrator with working colors created"
+}
+
+# --- Enhanced AI Task Runner with Verbose Thinking ---
+run_webdev_task() {
+    local full_prompt="$*"
+    local frameworks=$(detect_frameworks)
+
+    thinking "Analyzing user request..." 0
+    show_reasoning "User request: $full_prompt" "Input Analysis"
+
+    # Enhanced prompt analysis for web development
+    if [[ "$full_prompt" =~ (component|api|server|database|deploy|build|responsive) ]]; then
+        thinking "Web development task detected" 1
+        full_prompt="WEB DEVELOPMENT: $full_prompt - Generate complete, production-ready code with all necessary files."
+    fi
+
+    if [ -f "$SESSION_FILE" ]; then
+        local proj=$(cat "$SESSION_FILE")
+        thinking "Active session detected: $proj" 1
+        full_prompt="$full_prompt --project=$proj"
+    fi
+
+    log_event "TASK_START" "WebDev Prompt: $full_prompt | Frameworks: $frameworks"
+    
+    echo -e "\n\x1b[35m🎯 STARTING WEBDEV AI TASK\x1b[0m"
+    echo -e "\x1b[90mTask: $full_prompt\x1b[0m"
+    echo -e "\x1b[35m──────────────────────────────────────────────────────────────\x1b[0m\n"
+    
+    # Run with proper Node.js module resolution
+    cd "$AI_HOME"
+    node "$ORCHESTRATOR_FILE" $full_prompt
+    cd - > /dev/null
+    
+    log_event "TASK_END" "Web development task completed"
+}
+
+# --- Toggle Verbose Mode ---
+toggle_verbose() {
+    if [ "$VERBOSE_THINKING" = "true" ]; then
+        export VERBOSE_THINKING="false"
+        export SHOW_REASONING="false"
+        echo "Verbose thinking: DISABLED"
+    else
+        export VERBOSE_THINKING="true"
+        export SHOW_REASONING="true"
+        echo "Verbose thinking: ENABLED"
+    fi
+}
+
+# --- Installation Function ---
+install_webdev_ai() {
+    echo -e "\n\x1b[1;36m🚀 INSTALLING WEBDEV AI CODE ENGINE\x1b[0m"
+    echo -e "\x1b[90m=========================================\x1b[0m"
+    
+    # Create directories
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR" "$LOG_DIR"
+    
+    # Initialize system
+    check_dependencies
+    init_databases
+    setup_orchestrator
+    
+    echo -e "\n\x1b[1;32m✅ INSTALLATION COMPLETED SUCCESSFULLY!\x1b[0m"
+    echo -e "\x1b[1;33m💡 Usage examples:\x1b[0m"
+    echo "  webdev-ai 'create a React component for user dashboard'"
+    echo "  webdev-ai --start my-project"
+    echo "  webdev-ai status"
+    echo "  webdev-ai --verbose  # Toggle thinking mode"
+}
+
+# --- Main Enhanced Execution ---
+main() {
+    # Ensure AI_HOME exists
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR"
+    
+    # Initialize core systems
+    check_dependencies
+    init_databases
+    setup_orchestrator
+
+    if [ $# -eq 0 ]; then
+        enhanced_status
+        exit 0
+    fi
+
+    COMMAND="$1"
+    shift
+
+    case "$COMMAND" in
+        --start)
+            read -p "Project/Repo name: " proj
+            echo "$proj" > "$SESSION_FILE"
+            log_event "SESSION" "Started web development session for $proj"
+            thinking "Session started for project: $proj" 0
+            ;;
+        --stop)
+            [ -f "$SESSION_FILE" ] && proj=$(cat "$SESSION_FILE") && log_event "SESSION" "Stopped session for $proj"
+            rm -f "$SESSION_FILE"
+            thinking "Session stopped" 0
+            ;;
+        --verbose|--think)
+            toggle_verbose
+            ;;
+        --quiet)
+            export VERBOSE_THINKING="false"
+            export SHOW_REASONING="false"
+            echo "Verbose thinking: DISABLED"
+            ;;
+        --install)
+            install_webdev_ai
+            ;;
+        run)
+            run_webdev_task "$@"
+            ;;
+        status)
+            enhanced_status
+            ;;
+        --create-component)
+            run_webdev_task "Create a React/Vue component for: $@"
+            ;;
+        --create-api)
+            run_webdev_task "Create a Node.js/Express API endpoint for: $@"
+            ;;
+        *)
+            run_webdev_task "$COMMAND $@"
+            ;;
+    esac
+}
+
+# --- Execute Main Function ---
+main "$@"
