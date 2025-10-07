@@ -9,7 +9,7 @@ set -euo pipefail
 # ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝     ╚══════╝
 #
 # WebDev Code-Engine Scripting Assistant
-# Version: 4.0.0 (Enhanced Web Development Focus)
+# Version: 4.0.1 (Fixed Function Ordering)
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -32,26 +32,6 @@ export SESSION_FILE="$AI_HOME/.session"
 export OLLAMA_BIN="ollama"
 export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
 
-# Web Development Framework Detection
-detect_frameworks() {
-    local project_path="${1:-$PWD}"
-    local frameworks=()
-    
-    [ -f "$project_path/package.json" ] && frameworks+=("nodejs")
-    [ -f "$project_path/requirements.txt" ] && frameworks+=("python")
-    [ -f "$project_path/composer.json" ] && frameworks+=("php")
-    [ -f "$project_path/go.mod" ] && frameworks+=("go")
-    [ -f "$project_path/Cargo.toml" ] && frameworks+=("rust")
-    [ -f "$project_path/Gemfile" ] && frameworks+=("ruby")
-    [ -d "$project_path/.next" ] && frameworks+=("nextjs")
-    [ -d "$project_path/nuxt.config.js" ] && frameworks+=("nuxtjs")
-    [ -f "$project_path/vue.config.js" ] && frameworks+=("vue")
-    [ -f "$project_path/angular.json" ] && frameworks+=("angular")
-    [ -f "$project_path/react-native.config.js" ] && frameworks+=("react-native")
-    
-    echo "${frameworks[@]}"
-}
-
 # --- Enhanced Logging ---
 log_event() {
     local level="$1"
@@ -68,22 +48,46 @@ log_event() {
     esac
     
     echo "[${color}${level}\x1b[0m] $(date): $message"
-    sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$level', '$message');" || true
+    sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$level', '$message');" 2>/dev/null || true
 }
 
 # --- Enhanced Dependency Checks ---
 check_node_modules() {
+    log_event "INFO" "Checking Node.js modules..."
     local required_modules=("sqlite3" "express" "axios" "chalk" "inquirer" "ws" "body-parser" "cors")
     
     for module in "${required_modules[@]}"; do
         if [ ! -d "$NODE_MODULES/$module" ]; then
-            echo "[INFO] Node module '$module' missing. Installing enhanced packages..."
-            npm install --prefix "$AI_HOME" $module
+            log_event "INFO" "Installing Node module: $module"
+            npm install --prefix "$AI_HOME" $module --silent
         fi
     done
 }
 
+check_dependencies() {
+    log_event "INFO" "Checking system dependencies..."
+    local missing_deps=()
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    check_node_modules
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        log_event "ERROR" "Missing dependencies: ${missing_deps[*]}"
+        echo "Please install missing dependencies: ${missing_deps[*]}"
+        exit 1
+    fi
+    
+    log_event "SUCCESS" "All dependencies satisfied"
+}
+
 check_web_dependencies() {
+    log_event "INFO" "Checking web development dependencies..."
     local missing_deps=()
     local web_deps=("curl" "jq" "nginx" "certbot" "docker" "git" "node" "python3" "php" "sqlite3")
     
@@ -97,15 +101,38 @@ check_web_dependencies() {
         log_event "WARN" "Missing web dependencies: ${missing_deps[*]}"
         return 1
     fi
+    
+    log_event "SUCCESS" "All web dependencies satisfied"
     return 0
+}
+
+# Web Development Framework Detection
+detect_frameworks() {
+    local project_path="${1:-$PWD}"
+    local frameworks=()
+    
+    [ -f "$project_path/package.json" ] && frameworks+=("nodejs")
+    [ -f "$project_path/requirements.txt" ] && frameworks+=("python")
+    [ -f "$project_path/composer.json" ] && frameworks+=("php")
+    [ -f "$project_path/go.mod" ] && frameworks+=("go")
+    [ -f "$project_path/Cargo.toml" ] && frameworks+=("rust")
+    [ -f "$project_path/Gemfile" ] && frameworks+=("ruby")
+    [ -d "$project_path/.next" ] && frameworks+=("nextjs")
+    [ -f "$project_path/nuxt.config.js" ] || [ -f "$project_path/nuxt.config.ts" ] && frameworks+=("nuxtjs")
+    [ -f "$project_path/vue.config.js" ] && frameworks+=("vue")
+    [ -f "$project_path/angular.json" ] && frameworks+=("angular")
+    [ -f "$project_path/react-native.config.js" ] && frameworks+=("react-native")
+    
+    echo "${frameworks[@]}"
 }
 
 # --- Enhanced Database Initialization ---
 init_databases() {
+    log_event "INFO" "Initializing databases..."
     mkdir -p "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR"
 
     # Enhanced ai_data.db
-    sqlite3 "$AI_DATA_DB" <<SQL
+    sqlite3 "$AI_DATA_DB" <<SQL 2>/dev/null
 CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT,
@@ -135,7 +162,7 @@ CREATE TABLE IF NOT EXISTS web_components (
 SQL
 
     # Enhanced blobs.db
-    sqlite3 "$BLOBS_DB" <<SQL
+    sqlite3 "$BLOBS_DB" <<SQL 2>/dev/null
 CREATE TABLE IF NOT EXISTS blobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_name TEXT,
@@ -157,7 +184,7 @@ CREATE TABLE IF NOT EXISTS scripts (
 SQL
 
     # Web configuration database
-    sqlite3 "$WEB_CONFIG_DB" <<SQL
+    sqlite3 "$WEB_CONFIG_DB" <<SQL 2>/dev/null
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE,
@@ -192,6 +219,7 @@ SQL
 
 # --- Web Development Templates ---
 setup_web_templates() {
+    log_event "INFO" "Setting up web development templates..."
     mkdir -p "$TEMPLATES_DIR"
     
     # React Component Template
@@ -245,8 +273,9 @@ SQL
 
 # --- Enhanced Orchestrator with WebDev Focus ---
 setup_orchestrator() {
-mkdir -p "$AI_HOME"
-cat > "$ORCHESTRATOR_FILE" <<'EOF_JS'
+    log_event "INFO" "Setting up enhanced orchestrator..."
+    mkdir -p "$AI_HOME"
+    cat > "$ORCHESTRATOR_FILE" <<'EOF_JS'
 // Enhanced WebDev Code-Engine Orchestrator
 import { exec, spawn } from 'child_process';
 import crypto from 'crypto';
@@ -679,7 +708,7 @@ CMD ["npm", "start"]`;
 })();
 EOF_JS
 
-    log_event "SUCCESS" "Enhanced WebDev orchestrator created"
+    log_event "SUCCESS" "Enhanced orchestrator created at $ORCHESTRATOR_FILE"
 }
 
 # --- Web Development Commands ---
@@ -711,6 +740,19 @@ SERVER_JS
     node "$SCRIPTS_DIR/serve_$project_name.js" &
     echo $! > "$AI_HOME/server_$project_name.pid"
     log_event "SUCCESS" "Web server started for $project_name on port $port"
+}
+
+stop_web_server() {
+    local project_name="$1"
+    local pid_file="$AI_HOME/server_$project_name.pid"
+    
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file")
+        kill "$pid" 2>/dev/null && rm -f "$pid_file"
+        log_event "INFO" "Stopped web server for $project_name"
+    else
+        log_event "WARN" "No running server found for $project_name"
+    fi
 }
 
 deploy_project() {
@@ -768,72 +810,109 @@ enhanced_status() {
     echo "WebDev Code-Engine Status:"
     echo "AI_HOME: $AI_HOME"
     echo "Projects: $(ls -1 "$PROJECTS_DIR" 2>/dev/null | wc -l) created"
-    echo "Frameworks detected: $(detect_frameworks | tr '\n' ' ')"
-    echo "Web Server: $(ps aux | grep -v grep | grep -q "serve_" && echo "Running" || echo "Stopped")"
     echo "Active Session: $([ -f "$SESSION_FILE" ] && cat "$SESSION_FILE" || echo "None")"
     
     # Show recent projects
     echo -e "\nRecent Projects:"
     sqlite3 "$WEB_CONFIG_DB" "SELECT name, framework, status FROM projects ORDER BY ts DESC LIMIT 3;" 2>/dev/null | while IFS='|' read name framework status; do
         echo "  - $name ($framework): $status"
-    done
+    done || echo "  No projects yet"
+}
+
+# --- Installation Function ---
+install_webdev_ai() {
+    log_event "INFO" "Installing WebDev AI Code-Engine..."
+    
+    # Create directories
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR" "$LOG_DIR"
+    
+    # Initialize system
+    check_dependencies
+    init_databases
+    setup_web_templates
+    setup_orchestrator
+    
+    log_event "SUCCESS" "WebDev AI Code-Engine installation completed!"
+    echo "🎉 Installation complete! You can now use:"
+    echo "   webdev-ai 'create a react component for user dashboard'"
+    echo "   webdev-ai --start my-project"
+    echo "   webdev-ai status"
 }
 
 # --- Main Enhanced Execution ---
-check_dependencies
-check_web_dependencies
-init_databases
-setup_web_templates
-setup_orchestrator
+main() {
+    # Ensure AI_HOME exists
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR"
+    
+    # Initialize core systems
+    check_dependencies
+    init_databases
+    setup_web_templates
+    setup_orchestrator
 
-if [ $# -eq 0 ]; then
-    enhanced_status
-    exit 0
-fi
-
-COMMAND="$1"
-shift
-
-case "$COMMAND" in
-    --start)
-        read -p "Project/Repo name: " proj
-        echo "$proj" > "$SESSION_FILE"
-        log_event "SESSION" "Started web development session for $proj"
-        ;;
-    --stop)
-        [ -f "$SESSION_FILE" ] && proj=$(cat "$SESSION_FILE") && log_event "SESSION" "Stopped session for $proj"
-        rm -f "$SESSION_FILE"
-        ;;
-    --serve)
-        proj="${1:-$(cat "$SESSION_FILE" 2>/dev/null)}"
-        if [ -n "$proj" ]; then
-            setup_web_server "$proj" "$2"
-        else
-            echo "Error: No project specified and no active session"
-        fi
-        ;;
-    --deploy)
-        proj="${1:-$(cat "$SESSION_FILE" 2>/dev/null)}"
-        env="${2:-development}"
-        if [ -n "$proj" ]; then
-            deploy_project "$proj" "$env"
-        else
-            echo "Error: No project specified"
-        fi
-        ;;
-    run)
-        run_webdev_task "$@"
-        ;;
-    status)
+    if [ $# -eq 0 ]; then
         enhanced_status
-        ;;
-    --create-component)
-        run_webdev_task "Create a React/Vue component for: $@"
-        ;;
-    --create-api)
-        run_webdev_task "Create a Node.js/Express API endpoint for: $@"
-        ;;
-    *)
-        run_webdev_task "$COMMAND $@"
-        ;;
-esac
+        exit 0
+    fi
+
+    COMMAND="$1"
+    shift
+
+    case "$COMMAND" in
+        --start)
+            read -p "Project/Repo name: " proj
+            echo "$proj" > "$SESSION_FILE"
+            log_event "SESSION" "Started web development session for $proj"
+            ;;
+        --stop)
+            [ -f "$SESSION_FILE" ] && proj=$(cat "$SESSION_FILE") && log_event "SESSION" "Stopped session for $proj"
+            rm -f "$SESSION_FILE"
+            ;;
+        --serve)
+            proj="${1:-$(cat "$SESSION_FILE" 2>/dev/null)}"
+            if [ -n "$proj" ]; then
+                setup_web_server "$proj" "$2"
+            else
+                echo "Error: No project specified and no active session"
+            fi
+            ;;
+        --stop-server)
+            proj="${1:-$(cat "$SESSION_FILE" 2>/dev/null)}"
+            if [ -n "$proj" ]; then
+                stop_web_server "$proj"
+            else
+                echo "Error: No project specified"
+            fi
+            ;;
+        --deploy)
+            proj="${1:-$(cat "$SESSION_FILE" 2>/dev/null)}"
+            env="${2:-development}"
+            if [ -n "$proj" ]; then
+                deploy_project "$proj" "$env"
+            else
+                echo "Error: No project specified"
+            fi
+            ;;
+        run)
+            run_webdev_task "$@"
+            ;;
+        status)
+            enhanced_status
+            ;;
+        --create-component)
+            run_webdev_task "Create a React/Vue component for: $@"
+            ;;
+        --create-api)
+            run_webdev_task "Create a Node.js/Express API endpoint for: $@"
+            ;;
+        --install)
+            install_webdev_ai
+            ;;
+        *)
+            run_webdev_task "$COMMAND $@"
+            ;;
+    esac
+}
+
+# --- Execute Main Function ---
+main "$@"
