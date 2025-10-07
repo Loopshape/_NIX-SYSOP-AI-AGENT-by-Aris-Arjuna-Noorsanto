@@ -1,23 +1,21 @@
-// AI DevOps Orchestrator (Node.js Core)
+// Enhanced WebDev Code-Engine with Working Color Implementation
 import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 
-// --- CONFIGURATION ---
+// Enhanced Environment
 const AI_HOME = process.env.AI_HOME;
 const PROJECTS_DIR = process.env.PROJECTS_DIR;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
-const VERBOSE_THINKING = process.env.VERBOSE_THINKING === 'true';
-const SHOW_REASONING = process.env.SHOW_REASONING === 'true';
-const AI_DATA_DB = process.env.AI_DATA_DB;
+const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
+const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 
-// Default Models (Loaded from Bash config)
-const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
-const MODEL_WEIGHTS = { "2244:latest": 2, "core:latest": 2, "loop:latest": 1, "coin:latest": 1, "code:latest": 2 };
+// Enhanced Model Pool for Web Development
+const WEB_DEV_MODELS = ["2244", "core", "loop", "coin", "code"];
 
-// Working color implementation (Simplified for Node.js)
+// Working color implementation using template literals
 const colors = {
     reset: '\x1b[0m',
     bright: '\x1b[1m',
@@ -30,8 +28,11 @@ const colors = {
     cyan: '\x1b[36m',
     gray: '\x1b[90m',
     
+    // Combined styles
     boldCyan: (text) => `\x1b[1;36m${text}\x1b[0m`,
     boldGreen: (text) => `\x1b[1;32m${text}\x1b[0m`,
+    boldMagenta: (text) => `\x1b[1;35m${text}\x1b[0m`,
+    blueText: (text) => `\x1b[34m${text}\x1b[0m`,
     yellowText: (text) => `\x1b[33m${text}\x1b[0m`,
     greenText: (text) => `\x1b[32m${text}\x1b[0m`,
     redText: (text) => `\x1b[31m${text}\x1b[0m`,
@@ -40,19 +41,7 @@ const colors = {
     magentaText: (text) => `\x1b[35m${text}\x1b[0m`
 };
 
-// --- Database Helpers ---
-const getDb = () => new sqlite3.Database(AI_DATA_DB);
-
-const logEvent = (level, message, metadata = '') => {
-    const db = getDb();
-    const sql = `INSERT INTO events (event_type, message, metadata) VALUES (?, ?, ?)`;
-    db.run(sql, [level, message, metadata], (err) => {
-        if (err) console.error(colors.redText(`[DB ERROR] Failed to log event: ${err.message}`));
-        db.close();
-    });
-};
-
-// --- Verbose thinking functions ---
+// Verbose thinking functions
 const think = (message, depth = 0) => {
     if (VERBOSE_THINKING) {
         const indent = '  '.repeat(depth);
@@ -68,124 +57,11 @@ const showReasoning = (reasoning, context = 'Reasoning') => {
     }
 };
 
-// --- Math/Hashing Helpers ---
-const genCircularIndex = () => {
-    const secondsInDay = 86400;
-    const now = new Date();
-    const secondsOfDay = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-    
-    const scaledPi2 = 6283185; 
-    const scaledIndex = Math.floor((secondsOfDay / secondsInDay) * scaledPi2);
-    
-    return scaledIndex.toString().padStart(7, '0');
-};
-
-const genRecursiveHash = (prompt) => {
-    const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').substring(0, 8);
-    const circularIndex = genCircularIndex();
-    const baseString = `${promptHash}.${circularIndex}`;
-
-    const hash1 = crypto.createHash('sha256').update(baseString).digest('hex').substring(0, 4);
-    const hash2 = crypto.createHash('sha256').update(hash1 + baseString).digest('hex').substring(4, 8);
-    const hash3 = crypto.createHash('sha256').update(hash2 + hash1 + baseString).digest('hex').substring(8, 12);
-    const hash4 = crypto.createHash('sha256').update(hash3 + hash2 + hash1 + baseString).digest('hex').substring(12, 16);
-    const hash5 = crypto.createHash('sha256').update(hash4 + hash3 + hash2 + hash1 + baseString).digest('hex').substring(16, 20);
-
-    return `${hash1}.${hash2}.${hash3}.${hash4}.${hash5}.${circularIndex}`;
-};
-
-// --- Dynamic Model Selection (Ported to Node.js) ---
-const selectDynamicModels = (framework, complexity) => {
-    return new Promise((resolve, reject) => {
-        think("Selecting dynamic model pool for task...", 1);
-        const db = getDb();
-        const POOL_SIZE = 3;
-        
-        const availableModels = WEB_DEV_MODELS; 
-        
-        if (availableModels.length === 0) {
-            logEvent("ERROR", "No Ollama models found. Falling back to defaults.");
-            db.close();
-            return resolve(WEB_DEV_MODELS);
-        }
-
-        let modelScores = {};
-        let promises = [];
-
-        availableModels.forEach(model => {
-            const query = `
-                SELECT SUM(
-                    CASE T1.proof_state
-                        WHEN 'CONVERGED' THEN 3 * T1.complexity
-                        ELSE -1 * T1.complexity
-                    END
-                ) AS score
-                FROM memories AS T1
-                JOIN model_usage AS T2 ON T1.task_id = T2.task_id
-                WHERE T2.model_name = ? AND T1.framework LIKE ?;
-            `;
-            
-            promises.push(new Promise((res, rej) => {
-                db.get(query, [model, `%${framework}%`], (err, row) => {
-                    if (err) {
-                        console.error(colors.redText(`[DB ERROR] Scoring model ${model}: ${err.message}`));
-                        modelScores[model] = 0;
-                    } else {
-                        modelScores[model] = row.score || 0;
-                    }
-                    res();
-                });
-            }));
-        });
-
-        Promise.all(promises).then(() => {
-            db.close();
-            
-            const sortedModels = Object.entries(modelScores)
-                .sort(([, scoreA], [, scoreB]) => scoreB - scoreA)
-                .map(([model]) => model);
-
-            let dynamicPool = sortedModels.slice(0, POOL_SIZE);
-            
-            if (dynamicPool.length < POOL_SIZE) {
-                availableModels.forEach(model => {
-                    if (!dynamicPool.includes(model)) {
-                        dynamicPool.push(model);
-                    }
-                });
-                dynamicPool = dynamicPool.slice(0, POOL_SIZE);
-            }
-
-            const reasoningText = `Scores: ${JSON.stringify(modelScores)}\nSelected dynamic pool: ${dynamicPool.join(', ')}`;
-            showReasoning(reasoningText, "Dynamic Model Selection");
-            resolve(dynamicPool);
-        });
-    });
-};
-
-const updateModelUsage = (taskId, modelPool) => {
-    return new Promise((resolve, reject) => {
-        think("Logging model usage for this task...", 2);
-        const db = getDb();
-        db.serialize(() => {
-            modelPool.forEach(model => {
-                const sql = `INSERT OR IGNORE INTO model_usage (task_id, model_name) VALUES (?, ?)`;
-                db.run(sql, [taskId, model], (err) => {
-                    if (err) console.error(colors.redText(`[DB ERROR] Failed to log model usage: ${err.message}`));
-                });
-            });
-            db.close(resolve);
-        });
-    });
-};
-
-// --- Proof Tracker (Modified for 2π Modulo Logic) ---
 class WebDevProofTracker {
-    constructor(initialPrompt, detectedFrameworks = [], taskId) {
-        this.taskId = taskId;
-        this.cycleIndex = 0; 
-        this.netWorthIndex = 0;
-        this.entropyRatio = (initialPrompt.length ^ Date.now()) / 1000;
+    constructor(initialPrompt, detectedFrameworks = []) {
+        this.cycleIndex = initialPrompt.length;
+        this.netWorthIndex = (this.cycleIndex % 128) << 2;
+        this.entropyRatio = (this.cycleIndex ^ Date.now()) / 1000;
         this.frameworks = detectedFrameworks;
         this.complexityScore = this.calculateComplexity(initialPrompt);
         this.reasoningChain = [];
@@ -216,36 +92,23 @@ class WebDevProofTracker {
 
     proofCycle(converged, frameworkUsed = '', reasoning = '') {
         think(`Processing proof cycle: converged=${converged}, framework=${frameworkUsed}`, 1);
-        this.cycleIndex += 1;
-        this.netWorthIndex += converged ? 1 : -1;
+        this.cycleIndex += converged ? 1 : 0;
+        this.netWorthIndex -= converged ? 0 : 1;
         if (frameworkUsed && !this.frameworks.includes(frameworkUsed)) {
             this.frameworks.push(frameworkUsed);
-        }
-        
-        let finalConverged = converged;
-        
-        // ## 2π Modulo Logical Algorithm ##
-        const circularIndex = parseInt(genCircularIndex());
-        const dynamicThreshold = (circularIndex % 3) + 1; 
-
-        if (this.netWorthIndex >= dynamicThreshold) {
-            reasoning += ` Dynamic threshold (${dynamicThreshold}) met. Accelerating convergence.`;
-            finalConverged = true; 
         }
         
         if (reasoning) {
             this.reasoningChain.push({
                 cycle: this.cycleIndex,
-                converged: finalConverged,
+                converged,
                 framework: frameworkUsed,
                 reasoning,
                 timestamp: new Date().toISOString()
             });
         }
         
-        showReasoning(`Cycle ${this.cycleIndex}: ${finalConverged ? 'CONVERGED' : 'DIVERGED'}, Net Worth: ${this.netWorthIndex}. Dynamic Threshold: ${dynamicThreshold}.`, 'Proof Cycle');
-        
-        return finalConverged;
+        showReasoning(`Cycle ${this.cycleIndex}: ${converged ? 'CONVERGED' : 'DIVERGED'}, Net Worth: ${this.netWorthIndex}`, 'Proof Cycle');
     }
 
     getState() {
@@ -264,13 +127,12 @@ class WebDevOrchestrator {
     constructor(prompt, options) {
         this.initialPrompt = prompt;
         this.options = options;
-        this.taskId = genRecursiveHash(prompt); 
+        this.taskId = crypto.createHash('sha256').update(Date.now().toString()).digest('hex');
         this.detectedFrameworks = this.detectFrameworksFromPrompt(prompt);
-        this.proofTracker = new WebDevProofTracker(prompt, this.detectedFrameworks, this.taskId);
-        this.modelPool = WEB_DEV_MODELS; 
+        this.proofTracker = new WebDevProofTracker(prompt, this.detectedFrameworks);
         
         think(`Initialized orchestrator for task: ${prompt.substring(0, 100)}...`, 0);
-        showReasoning(`Task ID (2π-indexed): ${this.taskId}`, 'Task ID Generation');
+        showReasoning(`Detected frameworks: ${this.detectedFrameworks.join(', ')}`, 'Framework Detection');
     }
 
     detectFrameworksFromPrompt(prompt) {
@@ -316,22 +178,11 @@ User Task: `;
         return enhancedPrompt;
     }
 
-    async readProjectFile(filePath) {
-        try {
-            const content = fs.readFileSync(filePath, 'utf8');
-            think(`Successfully read file: ${filePath}`, 1);
-            return `--- START FILE: ${filePath} ---\n${content}\n--- END FILE: ${filePath} ---\n\n`;
-        } catch (error) {
-            console.error(colors.redText(`[FILE ERROR] Could not read file ${filePath}: ${error.message}`));
-            return `--- FILE READ ERROR: ${filePath} ---\n`;
-        }
-    }
-
     async runOllama(model, currentPrompt, framework, iteration) {
         return new Promise((resolve, reject) => {
             const enhancedPrompt = this.getEnhancedSystemPrompt(framework) + currentPrompt;
+            think(`Model ${model} processing (iteration ${iteration})...`, 2);
             
-            // Log the start of the model's thinking process
             console.log(colors.blueText(`\n[${framework.toUpperCase()}-ITERATION-${iteration}]`), colors.yellowText(`${model} thinking...`));
             
             const command = `${OLLAMA_BIN} run ${model} "${enhancedPrompt.replace(/"/g, '\\"')}"`;
@@ -344,7 +195,6 @@ User Task: `;
             });
             
             child.stdout.on('data', data => {
-                // Token Streaming Verbose Output
                 if (VERBOSE_THINKING) {
                     process.stdout.write(colors.grayText(`  ${data}`));
                 } else {
@@ -374,10 +224,7 @@ User Task: `;
     }
 
     async recursiveConsensus() {
-        think("Starting recursive consensus process (MAX PARALLELISM)...", 1);
-        
-        this.modelPool = await selectDynamicModels(this.detectedFrameworks[0] || 'node', this.proofTracker.complexityScore);
-        
+        think("Starting recursive consensus process...", 1);
         let currentPrompt = this.initialPrompt;
         let lastFusedOutput = "";
         let converged = false;
@@ -386,14 +233,15 @@ User Task: `;
         for (let i = 0; i < 3 && !converged; i++) {
             think(`Consensus iteration ${i + 1}/3...`, 2);
             
-            // MAX PARALLELISM: Launch all models simultaneously using Promise.all
-            const promises = this.modelPool.map((model, index) => {
+            const promises = WEB_DEV_MODELS.map((model, index) => {
+                think(`Launching model ${index + 1}/${WEB_DEV_MODELS.length}: ${model}`, 3);
                 return this.runOllama(model, currentPrompt, bestFramework, i + 1).catch(e => {
-                    return e; // Capture error but don't stop Promise.all
+                    think(`Model ${model} failed: ${e}`, 3);
+                    return e;
                 });
             });
             
-            think("Waiting for all models to complete asynchronously...", 2);
+            think("Waiting for all models to complete...", 2);
             const results = await Promise.all(promises);
             const validResults = results.filter(r => 
                 typeof r === 'string' && r.length > 0 && !r.startsWith('OLLAMA EXECUTION ERROR')
@@ -409,14 +257,12 @@ User Task: `;
             const fusedOutput = this.fuseWebOutputs(validResults);
             
             const convergenceReasoning = `Iteration ${i + 1}: ${fusedOutput === lastFusedOutput ? 'Outputs converged' : 'Outputs still diverging'}`;
-            const initialConverged = fusedOutput === lastFusedOutput;
-            
-            // Proof Cycle with Dynamic Math Logic
-            converged = this.proofTracker.proofCycle(initialConverged, bestFramework, convergenceReasoning);
-            
-            if (converged) {
-                think("Consensus achieved! Dynamic threshold met or outputs converged.", 2);
+            if (fusedOutput === lastFusedOutput) {
+                converged = true;
+                this.proofTracker.proofCycle(true, bestFramework, convergenceReasoning);
+                think("Consensus achieved! Outputs converged.", 2);
             } else {
+                this.proofTracker.proofCycle(false, bestFramework, convergenceReasoning);
                 think("No consensus yet, continuing to next iteration...", 2);
             }
 
@@ -425,68 +271,60 @@ User Task: `;
         }
 
         think("Consensus process completed", 1);
-        await updateModelUsage(this.taskId, this.modelPool); 
-        return `[FINAL_ANSWER]\n${lastFusedOutput}`; // Return with FINAL_ANSWER tag
+        return lastFusedOutput;
     }
 
     fuseWebOutputs(results) {
         think(`Fusing ${results.length} model outputs...`, 2);
         
+        // Simple fusion: take the most complete output
         const scoredResults = results.map(output => {
             let score = 0;
+            
+            // Score based on code block presence
             const codeBlocks = (output.match(/```/g) || []).length / 2;
             score += codeBlocks * 10;
+            
+            // Score based on length (but not too long)
             score += Math.min(output.length / 100, 50);
+            
             return { output, score };
         });
         
+        // Sort by score and take the best
         scoredResults.sort((a, b) => b.score - a.score);
-        const bestOutput = scoredResults.output;
+        const bestOutput = scoredResults[0].output;
         
         showReasoning(`Selected output with score ${scoredResults[0].score}`, 'Output Fusion');
         return bestOutput;
     }
 
     parseEnhancedCodeBlocks(content) {
-        // CRITICAL FIX: Ensure content is a string before attempting to use it.
-        if (typeof content !== 'string' || content.length === 0) {
-            return [];
-        }
-        
         const regex = /```(\w+)\s*([\s\S]*?)```/g;
         const blocks = [];
         let match;
         
         while ((match = regex.exec(content)) !== null) {
-            const language = match; // Capture group 1: language
-            let code = match.trim(); // Capture group 2: code
+            const language = match[1];
+            let code = match[2].trim();
             
             blocks.push({ 
                 language: language, 
                 code: code,
-                framework: this.detectedFrameworks || 'node'
+                framework: this.detectedFrameworks[0] || 'node'
             });
         }
         
+        // If no code blocks found, treat entire content as a file
         if (blocks.length === 0 && content.trim().length > 0) {
             blocks.push({
                 language: 'javascript',
                 code: content.trim(),
-                framework: this.detectedFrameworks || 'node'
+                framework: this.detectedFrameworks[0] || 'node'
             });
         }
         
         return blocks;
-    }
-
-    async handleFileModification(filePath, newContent) {
-        think(`Applying modification to file: ${filePath}`, 1);
-        try {
-            fs.writeFileSync(filePath, newContent);
-            console.log(colors.boldGreen(`[SUCCESS] MODIFIED FILE: ${filePath}`));
-        } catch (error) {
-            console.error(colors.redText(`[ERROR] Failed to modify file ${filePath}: ${error.message}`));
-        }
     }
 
     async handleEnhancedCodeGeneration(content) {
@@ -496,31 +334,14 @@ User Task: `;
             return;
         }
 
-        // 1. Check for MODIFY_FILE directive
-        const modifyRegex = /^\s*MODIFY_FILE:\s*([^\s]+)\s*$/m;
-        const modifyMatch = content.match(modifyRegex);
-
-        if (modifyMatch) {
-            const targetPath = modifyMatch;
-            const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
-            const projectPath = path.join(PROJECTS_DIR, project);
-            const fullPath = path.join(projectPath, targetPath);
-
-            if (blocks.length === 1) {
-                await this.handleFileModification(fullPath, blocks.code);
-            } else {
-                console.error(colors.redText(`[ERROR] MODIFY_FILE directive found, but output contains ${blocks.length} code blocks. Only one block is supported for modification.`));
-            }
-            return;
-        }
-
-        // 2. Default to NEW FILE generation
         const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
         const projectPath = path.join(PROJECTS_DIR, project);
         
+        // Create project structure
         think(`Creating project directory: ${projectPath}`, 1);
         fs.mkdirSync(projectPath, { recursive: true });
 
+        // Generate files from code blocks
         for (const [i, block] of blocks.entries()) {
             const ext = block.language === 'javascript' ? 'js' : 
                        block.language === 'typescript' ? 'ts' : 
@@ -540,78 +361,45 @@ User Task: `;
     }
 
     async execute() {
-        think("Starting AI DevOps execution...", 0);
+        think("Starting WebDev AI execution...", 0);
         
-        // 1. Read file content if --file option is present
-        if (this.options.file) {
-            const fileContent = await this.readProjectFile(this.options.file);
-            this.initialPrompt = fileContent + this.initialPrompt;
-            showReasoning(`Injected file content from: ${this.options.file}`, 'File Context');
-        }
-
-        console.log(colors.boldCyan("\n🚀 AI DEVOPS ORCHESTRATOR STARTING..."));
+        console.log(colors.boldCyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
         console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
         
         const finalOutput = await this.recursiveConsensus();
         
         console.log(colors.boldGreen("\n✅ TASK COMPLETED SUCCESSFULLY"));
-        console.log(colors.boldCyan("\n--- Final Agent Output ---\n"));
+        console.log(colors.boldCyan("\n--- Final Web Development Output ---\n"));
         console.log(finalOutput);
         
-        // Only process files if the final output contains the FINAL_ANSWER tag
-        if (finalOutput.includes('[FINAL_ANSWER]')) {
-            const codeContent = finalOutput.substring(finalOutput.indexOf('[FINAL_ANSWER]') + '[FINAL_ANSWER]'.length).trim();
-            think("Saving results and generating code...", 1);
-            await this.handleEnhancedCodeGeneration(codeContent);
-        }
+        think("Saving results and generating code...", 1);
+        await this.handleEnhancedCodeGeneration(finalOutput);
         
-        console.log(colors.boldGreen("\n🎉 AI DEVOPS EXECUTION COMPLETED!"));
+        console.log(colors.boldGreen("\n🎉 WEBDEV AI EXECUTION COMPLETED!"));
         console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
-        
-        return finalOutput;
     }
 }
 
 // Enhanced CLI with verbose thinking
 (async () => {
     const args = process.argv.slice(2);
-    
-    // Parse options and collect positional arguments
-    const options = {};
-    const positionalArgs = [];
-    
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (arg.startsWith('--')) {
+    const prompt = args.filter(arg => !arg.startsWith('--')).join(' ');
+
+    const options = Object.fromEntries(
+        args.filter(arg => arg.startsWith('--')).map(arg => {
             const parts = arg.slice(2).split('=');
-            const key = parts;
-            const value = parts.length > 1 ? parts.slice(1).join('=') : true;
-            
-            // Special handling for --file
-            if (key === 'file' && typeof value === 'boolean') {
-                options[key] = args[i + 1];
-                i++; // Skip next argument
-            } else {
-                options[key] = value;
-            }
-        } else {
-            positionalArgs.push(arg);
-        }
-    }
-    
-    const prompt = positionalArgs.join(' ');
+            return [parts[0], parts.length > 1 ? parts.slice(1).join('=') : true];
+        })
+    );
 
     if (!prompt) {
-        // This should not happen as the Bash script handles the prompt check
-        process.exit(0);
+        console.log(colors.redText('Error: No prompt provided. Usage: webdev-ai "create a react component for user dashboard"'));
+        process.exit(1);
     }
 
-    console.log(colors.boldMagenta("\n🧠 AI DEVOPS - ORCHESTRATOR MODE"));
+    console.log(colors.boldMagenta("\n🧠 WEBDEV AI - VERBOSE THINKING MODE"));
     console.log(colors.magentaText("========================================\n"));
     
     const orchestrator = new WebDevOrchestrator(prompt, options);
-    const finalResponse = await orchestrator.execute();
-    
-    // Output the final response for the Bash script to capture
-    console.log(finalResponse);
+    await orchestrator.execute();
 })();
