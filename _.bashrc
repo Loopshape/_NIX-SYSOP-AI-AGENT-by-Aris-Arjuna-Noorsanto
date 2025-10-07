@@ -12,8 +12,8 @@ case $- in *i*) ;; *) return ;; esac
 # -------------------------------
 HISTCONTROL=ignoreboth
 shopt -s histappend checkwinsize
-HISTSIZE=5000
-HISTFILESIZE=10000
+HISTSIZE=0
+HISTFILESIZE=0
 
 # -------------------------------
 # Prompt (with colors if supported)
