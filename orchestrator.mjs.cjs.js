@@ -1,4 +1,4 @@
-// Enhanced WebDev Code-Engine with Working Color Implementation
+// Enhanced WebDev Code-Engine with Robust Error Handling
 import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -12,8 +12,8 @@ const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 
-// Enhanced Model Pool for Web Development
-const WEB_DEV_MODELS = ["llama3.1:8b", "codellama:13b", "mistral:7b", "starling-lm:7b", "wizardcoder:15b"];
+// Enhanced Model Pool for Web Development - KEEP YOUR CUSTOM MODELS
+const WEB_DEV_MODELS = ["2244", "core", "loop", "coin", "code"];
 
 // Working color implementation using template literals
 const colors = {
@@ -182,18 +182,20 @@ User Task: `;
         return new Promise((resolve, reject) => {
             const enhancedPrompt = this.getEnhancedSystemPrompt(framework) + currentPrompt;
             think(`Model ${model} processing (iteration ${iteration})...`, 2);
-            
+
             console.log(colors.blueText(`\n[${framework.toUpperCase()}-ITERATION-${iteration}]`), colors.yellowText(`${model} thinking...`));
-            
+
             const command = `${OLLAMA_BIN} run ${model} "${enhancedPrompt.replace(/"/g, '\\"')}"`;
             const child = exec(command);
             let output = '';
-            
+            let errorOutput = '';
+
             child.on('error', (err) => {
-                think(`Model ${model} encountered error: ${err.message}`, 2);
-                reject(`OLLAMA EXECUTION ERROR: ${err.message}`);
+                think(`Model ${model} spawn error: ${err.message}`, 2);
+                // Don't reject - return error as string so consensus continues
+                resolve(`MODEL_ERROR: ${model} failed to start - ${err.message}`);
             });
-            
+
             child.stdout.on('data', data => {
                 if (VERBOSE_THINKING) {
                     process.stdout.write(colors.grayText(`  ${data}`));
@@ -202,24 +204,37 @@ User Task: `;
                 }
                 output += data;
             });
-            
+
             child.stderr.on('data', data => {
+                errorOutput += data;
                 if (VERBOSE_THINKING) {
-                    process.stderr.write(colors.redText(`  ERROR: ${data}`));
-                } else {
-                    process.stderr.write(colors.redText(data));
+                    process.stderr.write(colors.redText(`  MODEL_STDERR: ${data}`));
                 }
             });
-            
+
             child.on('close', code => {
                 if (code !== 0) {
                     think(`Model ${model} exited with code ${code}`, 2);
-                    return reject(`Model ${model} exited with code ${code}`);
+                    const errorMsg = `MODEL_ERROR: ${model} exited with code ${code}`;
+                    if (errorOutput) {
+                        showReasoning(errorOutput, `Model ${model} Error Details`);
+                    }
+                    // Resolve with error instead of rejecting to continue consensus
+                    resolve(errorMsg);
+                } else {
+                    think(`Model ${model} completed successfully`, 2);
+                    resolve(output.trim());
                 }
-                
-                think(`Model ${model} completed successfully`, 2);
-                resolve(output.trim());
             });
+
+            // Add timeout protection
+            setTimeout(() => {
+                if (child.exitCode === null) {
+                    think(`Model ${model} timeout - terminating`, 2);
+                    child.kill();
+                    resolve(`MODEL_TIMEOUT: ${model} took too long to respond`);
+                }
+            }, 120000); // 2 minute timeout
         });
     }
 
@@ -235,28 +250,40 @@ User Task: `;
             
             const promises = WEB_DEV_MODELS.map((model, index) => {
                 think(`Launching model ${index + 1}/${WEB_DEV_MODELS.length}: ${model}`, 3);
-                return this.runOllama(model, currentPrompt, bestFramework, i + 1).catch(e => {
-                    think(`Model ${model} failed: ${e}`, 3);
-                    return e;
-                });
+                return this.runOllama(model, currentPrompt, bestFramework, i + 1);
             });
             
             think("Waiting for all models to complete...", 2);
             const results = await Promise.all(promises);
+            
+            // Filter out error messages but keep track
             const validResults = results.filter(r => 
-                typeof r === 'string' && r.length > 0 && !r.startsWith('OLLAMA EXECUTION ERROR')
+                typeof r === 'string' && 
+                r.length > 0 && 
+                !r.startsWith('MODEL_ERROR:') &&
+                !r.startsWith('OLLAMA EXECUTION ERROR') &&
+                !r.startsWith('MODEL_TIMEOUT:')
             );
+
+            // Log model failures
+            const failedModels = results.filter(r => 
+                r.startsWith('MODEL_ERROR:') || r.startsWith('MODEL_TIMEOUT:')
+            );
+            
+            if (failedModels.length > 0) {
+                showReasoning(`Failed models: ${failedModels.join(', ')}`, 'Model Health Check');
+            }
 
             if (validResults.length === 0) {
                 think("All models failed to produce valid output", 2);
-                return "Error: All models failed. Please check Ollama installation and model availability.";
+                return "Error: All models failed. Check if models are loaded: ollama list";
             }
 
-            think(`Fusing ${validResults.length} valid outputs...`, 2);
+            think(`Fusing ${validResults.length}/${WEB_DEV_MODELS.length} valid outputs...`, 2);
             this.proofTracker.crosslineEntropy(validResults.join(''));
             const fusedOutput = this.fuseWebOutputs(validResults);
             
-            const convergenceReasoning = `Iteration ${i + 1}: ${fusedOutput === lastFusedOutput ? 'Outputs converged' : 'Outputs still diverging'}`;
+            const convergenceReasoning = `Iteration ${i + 1}: ${fusedOutput === lastFusedOutput ? 'Outputs converged' : 'Outputs still diverging'} (${validResults.length}/${WEB_DEV_MODELS.length} models succeeded)`;
             if (fusedOutput === lastFusedOutput) {
                 converged = true;
                 this.proofTracker.proofCycle(true, bestFramework, convergenceReasoning);
@@ -277,7 +304,7 @@ User Task: `;
     fuseWebOutputs(results) {
         think(`Fusing ${results.length} model outputs...`, 2);
         
-        // Simple fusion: take the most complete output
+        // Enhanced fusion: consider code quality, completeness, and structure
         const scoredResults = results.map(output => {
             let score = 0;
             
@@ -288,6 +315,16 @@ User Task: `;
             // Score based on length (but not too long)
             score += Math.min(output.length / 100, 50);
             
+            // Score based on framework alignment
+            if (output.toLowerCase().includes(this.detectedFrameworks[0])) {
+                score += 20;
+            }
+            
+            // Penalize error messages
+            if (output.includes('error') || output.includes('sorry')) {
+                score -= 15;
+            }
+            
             return { output, score };
         });
         
@@ -295,7 +332,7 @@ User Task: `;
         scoredResults.sort((a, b) => b.score - a.score);
         const bestOutput = scoredResults[0].output;
         
-        showReasoning(`Selected output with score ${scoredResults[0].score}`, 'Output Fusion');
+        showReasoning(`Selected output with score ${scoredResults[0].score} (runner-up: ${scoredResults[1]?.score || 0})`, 'Output Fusion');
         return bestOutput;
     }
 
