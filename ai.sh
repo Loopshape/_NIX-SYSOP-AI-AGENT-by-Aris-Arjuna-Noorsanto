@@ -367,7 +367,7 @@ const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 
 // Enhanced Model Pool for Web Development
-const WEB_DEV_MODELS = ["llama3.1:8b", "codellama:13b", "mistral:7b", "starling-lm:7b", "wizardcoder:15b"];
+const WEB_DEV_MODELS = ["2244", "core", "loop", "coin", "code"];
 
 // Working color implementation using template literals
 const colors = {

@@ -1,11 +1,11 @@
-// Enhanced WebDev Code-Engine with Fixed Dependencies
+// Enhanced WebDev Code-Engine with Working Color Implementation
 import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 
-// Enhanced Environment - use process.env directly
+// Enhanced Environment
 const AI_HOME = process.env.AI_HOME;
 const PROJECTS_DIR = process.env.PROJECTS_DIR;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
@@ -13,36 +13,47 @@ const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 
 // Enhanced Model Pool for Web Development
-const WEB_DEV_MODELS = ["2244", "core", "loop", "coin", "code"];
+const WEB_DEV_MODELS = ["llama3.1:8b", "codellama:13b", "mistral:7b", "starling-lm:7b", "wizardcoder:15b"];
 
-// Simple chalk replacement for coloring
-const chalk = {
-    blue: (text) => `\x1b[34m${text}\x1b[0m`,
-    yellow: (text) => `\x1b[33m${text}\x1b[0m`,
-    green: (text) => `\x1b[32m${text}\x1b[0m`,
-    red: (text) => `\x1b[31m${text}\x1b[0m`,
-    cyan: (text) => `\x1b[36m${text}\x1b[0m`,
-    gray: (text) => `\x1b[90m${text}\x1b[0m`,
-    bold: {
-        cyan: (text) => `\x1b[1;36m${text}\x1b[0m`,
-        green: (text) => `\x1b[1;32m${text}\x1b[0m`,
-        magenta: (text) => `\x1b[1;35m${text}\x1b[0m`
-    }
+// Working color implementation using template literals
+const colors = {
+    reset: '\x1b[0m',
+    bright: '\x1b[1m',
+    dim: '\x1b[2m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    magenta: '\x1b[35m',
+    cyan: '\x1b[36m',
+    gray: '\x1b[90m',
+    
+    // Combined styles
+    boldCyan: (text) => `\x1b[1;36m${text}\x1b[0m`,
+    boldGreen: (text) => `\x1b[1;32m${text}\x1b[0m`,
+    boldMagenta: (text) => `\x1b[1;35m${text}\x1b[0m`,
+    blueText: (text) => `\x1b[34m${text}\x1b[0m`,
+    yellowText: (text) => `\x1b[33m${text}\x1b[0m`,
+    greenText: (text) => `\x1b[32m${text}\x1b[0m`,
+    redText: (text) => `\x1b[31m${text}\x1b[0m`,
+    cyanText: (text) => `\x1b[36m${text}\x1b[0m`,
+    grayText: (text) => `\x1b[90m${text}\x1b[0m`,
+    magentaText: (text) => `\x1b[35m${text}\x1b[0m`
 };
 
 // Verbose thinking functions
 const think = (message, depth = 0) => {
     if (VERBOSE_THINKING) {
         const indent = '  '.repeat(depth);
-        console.log(chalk.cyan(`${indent}🤔 THINKING: ${message}`));
+        console.log(colors.cyanText(`${indent}🤔 THINKING: ${message}`));
     }
 };
 
 const showReasoning = (reasoning, context = 'Reasoning') => {
     if (SHOW_REASONING && reasoning) {
-        console.log(chalk.yellow(`\n💭 ${context.toUpperCase()}:\n`));
-        console.log(chalk.gray(reasoning));
-        console.log(chalk.yellow('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+        console.log(colors.yellowText(`\n💭 ${context.toUpperCase()}:\n`));
+        console.log(colors.grayText(reasoning));
+        console.log(colors.yellowText('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
     }
 };
 
@@ -172,12 +183,11 @@ User Task: `;
             const enhancedPrompt = this.getEnhancedSystemPrompt(framework) + currentPrompt;
             think(`Model ${model} processing (iteration ${iteration})...`, 2);
             
-            console.log(chalk.blue(`\n[${framework.toUpperCase()}-ITERATION-${iteration}]`), chalk.yellow(`${model} thinking...`));
+            console.log(colors.blueText(`\n[${framework.toUpperCase()}-ITERATION-${iteration}]`), colors.yellowText(`${model} thinking...`));
             
             const command = `${OLLAMA_BIN} run ${model} "${enhancedPrompt.replace(/"/g, '\\"')}"`;
             const child = exec(command);
             let output = '';
-            let reasoning = '';
             
             child.on('error', (err) => {
                 think(`Model ${model} encountered error: ${err.message}`, 2);
@@ -186,18 +196,18 @@ User Task: `;
             
             child.stdout.on('data', data => {
                 if (VERBOSE_THINKING) {
-                    process.stdout.write(chalk.gray(`  ${data}`));
+                    process.stdout.write(colors.grayText(`  ${data}`));
                 } else {
-                    process.stdout.write(chalk.gray(data));
+                    process.stdout.write(colors.grayText(data));
                 }
                 output += data;
             });
             
             child.stderr.on('data', data => {
                 if (VERBOSE_THINKING) {
-                    process.stderr.write(chalk.red(`  ERROR: ${data}`));
+                    process.stderr.write(colors.redText(`  ERROR: ${data}`));
                 } else {
-                    process.stderr.write(chalk.red(data));
+                    process.stderr.write(colors.redText(data));
                 }
             });
             
@@ -343,30 +353,30 @@ User Task: `;
             const filePath = path.join(projectPath, fileName);
             
             fs.writeFileSync(filePath, block.code);
-            console.log(chalk.green(`[SUCCESS] Generated: ${filePath}`));
+            console.log(colors.greenText(`[SUCCESS] Generated: ${filePath}`));
         }
 
-        console.log(chalk.cyan(`\n🎉 Project ${project} created successfully!`));
-        console.log(chalk.cyan(`📁 Location: ${projectPath}`));
+        console.log(colors.cyanText(`\n🎉 Project ${project} created successfully!`));
+        console.log(colors.cyanText(`📁 Location: ${projectPath}`));
     }
 
     async execute() {
         think("Starting WebDev AI execution...", 0);
         
-        console.log(chalk.bold.cyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
-        console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+        console.log(colors.boldCyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
+        console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
         
         const finalOutput = await this.recursiveConsensus();
         
-        console.log(chalk.bold.green("\n✅ TASK COMPLETED SUCCESSFULLY"));
-        console.log(chalk.bold.cyan("\n--- Final Web Development Output ---\n"));
+        console.log(colors.boldGreen("\n✅ TASK COMPLETED SUCCESSFULLY"));
+        console.log(colors.boldCyan("\n--- Final Web Development Output ---\n"));
         console.log(finalOutput);
         
         think("Saving results and generating code...", 1);
         await this.handleEnhancedCodeGeneration(finalOutput);
         
-        console.log(chalk.bold.green("\n🎉 WEBDEV AI EXECUTION COMPLETED!"));
-        console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+        console.log(colors.boldGreen("\n🎉 WEBDEV AI EXECUTION COMPLETED!"));
+        console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
     }
 }
 
@@ -383,12 +393,12 @@ User Task: `;
     );
 
     if (!prompt) {
-        console.log(chalk.red('Error: No prompt provided. Usage: webdev-ai "create a react component for user dashboard"'));
+        console.log(colors.redText('Error: No prompt provided. Usage: webdev-ai "create a react component for user dashboard"'));
         process.exit(1);
     }
 
-    console.log(chalk.bold.magenta("\n🧠 WEBDEV AI - VERBOSE THINKING MODE"));
-    console.log(chalk.magenta("========================================\n"));
+    console.log(colors.boldMagenta("\n🧠 WEBDEV AI - VERBOSE THINKING MODE"));
+    console.log(colors.magentaText("========================================\n"));
     
     const orchestrator = new WebDevOrchestrator(prompt, options);
     await orchestrator.execute();
