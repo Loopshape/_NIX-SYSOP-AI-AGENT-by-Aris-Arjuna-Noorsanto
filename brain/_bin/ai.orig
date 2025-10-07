@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# -----------------------------
+# Self-Rewriting Iterative AI Pool Runner (Reloop Mode)
+# No HTML, JSON only, reloop automation
+# -----------------------------
+
+SELF_PATH="${BASH_SOURCE[0]}"
+ITER_FACTOR=0.628
+MAX_ITER=$(printf "%.0f" "$(echo "scale=0; $ITER_FACTOR*10" | bc)")
+
+POOL_MODELS=("core" "loop" "2244" "code")
+MANDATORY_MODEL="coin"
+[[ ! " ${POOL_MODELS[@]} " =~ " ${MANDATORY_MODEL} " ]] && POOL_MODELS+=("$MANDATORY_MODEL")
+
+OLLAMA_API_URL="${OLLAMA_API_URL:-http://localhost:11434/v1/completions}"
+HAS_SQLITE="${HAS_SQLITE:-0}"
+BLOBS_JSON="${BLOBS_JSON:-./blobs.json}"
+MEM_JSON="${MEM_JSON:-./memories.json}"
+SQLITE_DB="${SQLITE_DB:-./ai_data.db}"
+
+# -----------------------------
+# Backup original
+# -----------------------------
+[[ ! -f "${SELF_PATH}.orig" ]] && cp "$SELF_PATH" "${SELF_PATH}.orig"
+
+# -----------------------------
+# Helpers
+# -----------------------------
+call_ollama() { curl -s -X POST "$OLLAMA_API_URL" -H "Content-Type: application/json" -d "{\"model\":\"llama2\",\"prompt\":\"$1\",\"max_tokens\":500}"; }
+compute_modulo_range() {
+    local formula="$1"
+    local i_start="$2"
+    local i_end="$3"
+    local n="$4"
+    python3 - <<PYTHON
+import math, json
+formula = "$formula"
+i_start = $i_start
+i_end = $i_end
+n = $n
+results=[]
+for i in range(i_start,i_end+1):
+    try: val = eval(formula.replace("i",str(i))) % n
+    except: val=None
+    results.append({"i":i,"value":val})
+print(json.dumps(results))
+PYTHON
+}
+
+# -----------------------------
+# Reloop Iteration
+# -----------------------------
+BATCH_FILE="$1"
+[[ -z "$BATCH_FILE" || ! -f "$BATCH_FILE" ]] && echo '{"error":"Provide a valid batch file"}' && exit 1
+
+ITER=1
+while true; do
+    SEED=$(echo "$ITER * $ITER_FACTOR" | bc -l)
+    echo "[INFO] Reloop iteration $ITER, seed=$SEED" >&2
+
+    MEGA_JSON="{\"iteration\":$ITER,\"seed\":$SEED,\"models\":["
+
+    for model in "${POOL_MODELS[@]}"; do
+        MODEL_JSON="{\"model\":\"$model\",\"results\":["
+
+        while IFS="|" read -r cmd arg1 arg2 arg3 arg4 arg5; do
+            [[ -z "$cmd" ]] && continue
+            case "$cmd" in
+                get)
+                    target="$arg1"
+                    pattern="${arg2:-.*}"
+                    if [[ "$target" == "blobs" ]]; then
+                        result=$(jq --arg pattern "$pattern" '.[] | select(.file_path | test($pattern))' "$BLOBS_JSON")
+                    elif [[ "$target" == "memories" ]]; then
+                        result=$(jq --arg pattern "$pattern" '.[] | select(.task_id | test($pattern))' "$MEM_JSON")
+                    else
+                        result='{"error":"Unknown get target"}'
+                    fi
+                    MODEL_JSON+="{\"command\":\"get\",\"target\":\"$target\",\"pattern\":\"$pattern\",\"result\":$result},"
+                    ;;
+                search)
+                    keyword="$arg1"
+                    i_start="${arg2:-0}"
+                    i_end="${arg3:-5}"
+                    mod_n="${arg4:-100}"
+
+                    ai_formula=$(call_ollama "Generate numeric formula for '$keyword'")
+                    if [[ ! -z "$ai_formula" && "$ai_formula" != "null" ]]; then
+                        evolved_formula="($ai_formula) + i*($SEED)"
+                        calc_results=$(compute_modulo_range "$evolved_formula" "$i_start" "$i_end" "$mod_n")
+                    else
+                        calc_results='[]'
+                        evolved_formula=""
+                    fi
+
+                    MODEL_JSON+="{\"command\":\"search\",\"keyword\":\"$keyword\",\"evolved_formula\":\"$evolved_formula\",\"results\":$calc_results},"
+                    ;;
+                calc)
+                    formula="$arg1"
+                    i_start="${arg2:-0}"
+                    i_end="${arg3:-10}"
+                    n="$arg4"
+                    evolved_formula="($formula)+i*($SEED)"
+                    calc_results=$(compute_modulo_range "$evolved_formula" "$i_start" "$i_end" "$n")
+                    MODEL_JSON+="{\"command\":\"calc\",\"formula\":\"$formula\",\"evolved_formula\":\"$evolved_formula\",\"results\":$calc_results},"
+                    ;;
+                *)
+                    MODEL_JSON+="{\"error\":\"Unknown command $cmd\"},"
+                    ;;
+            esac
+        done < "$BATCH_FILE"
+
+        MODEL_JSON="${MODEL_JSON%,}]}"
+        MODEL_JSON+="}"
+        MEGA_JSON+="$MODEL_JSON,"
+    done
+
+    MEGA_JSON="${MEGA_JSON%,}]}"
+    echo "$MEGA_JSON" | jq .
+
+    # -----------------------------
+    # Increment iteration for next reloop
+    # -----------------------------
+    ITER=$((ITER+1))
+
+    # Optional: delay between reloop iterations
+    sleep 1
+done

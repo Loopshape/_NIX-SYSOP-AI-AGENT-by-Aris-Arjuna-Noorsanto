@@ -642,7 +642,7 @@ tool_run_command() {
     fi
 }
 
-# --- DEPENDENCY CHECK & SETUP (## MOVED TO TOP ##) ---
+# --- DEPENDENCY CHECK & SETUP ---
 install_node_modules() {
     log_think "Installing Node.js modules..."
     
@@ -718,7 +718,7 @@ check_dependencies() {
 }
 
 setup_environment() {
-    log_info "Running setup procedure"
+    log_info "Setting up AI Agent environment..."
 
     if ! setup_directories; then
         log_error "Failed to setup directories"
