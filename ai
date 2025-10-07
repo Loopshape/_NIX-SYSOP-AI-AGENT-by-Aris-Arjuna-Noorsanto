@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# SysOp-AI: A Self-Contained AI Command-Line Application
+# SysOp-AI: A Self-Contained, Self-Optimizing AI Command-Line Application
 #
 # This script provides a framework for interacting with a pool of local language
-# models via Ollama to perform tasks, generate code, and persist its state.
+# models. It dynamically selects the best models for a given task based on
+# their historical performance stored in its SQLite database.
 #
 # USAGE:
 #   sysop-ai <command> [options]
@@ -23,7 +24,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # ==============================================================================
-# SECTION 1: CORE AI ENGINE & HELPERS (Largely Unchanged)
+# SECTION 1: CORE AI ENGINE & HELPERS
 # ==============================================================================
 
 # -------------------- Paths & Configuration --------------------
@@ -43,12 +44,14 @@ export PROOF_FRAMEWORKS=""
 export PROOF_COMPLEXITY=0
 export PROOF_TASK_ID=""
 
-# -------------------- Models --------------------
+# -------------------- Models (Now a Default/Fallback) --------------------
 declare -A MODEL_WEIGHTS
-POOL_MODELS=("2244:latest" "core:latest" "loop:latest" "coin:latest" "code:latest")
+DEFAULT_POOL_MODELS=("2244:latest" "core:latest" "loop:latest" "coin:latest" "code:latest")
 MODEL_WEIGHTS=( ["2244:latest"]=2 ["core:latest"]=2 ["loop:latest"]=1 ["coin:latest"]=1 ["code:latest"]=2 )
+# This global will be dynamically overwritten by the new logic
+POOL_MODELS=("${DEFAULT_POOL_MODELS[@]}")
 
-# -------------------- Core Initializer --------------------
+# -------------------- Core Initializer (## MODIFIED ##) --------------------
 _initialize_env() {
     thinking "Initializing environment and databases..." 0
     mkdir -p "$AI_HOME" "$TASKS_DIR"
@@ -65,6 +68,12 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS reasoning_chains (
     id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, step INTEGER,
     reasoning TEXT, context TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+-- ## NEW TABLE ##: To track which models were used for which task ID
+CREATE TABLE IF NOT EXISTS model_usage (
+    task_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    PRIMARY KEY (task_id, model_name)
 );
 EOF
     sqlite3 "$BLOBS_DB" <<'EOF'
@@ -175,11 +184,14 @@ proof_cycle() {
 add_memory_enhanced() {
     local prompt_esc=$(sed "s/'/''/g" <<< "$1") response_esc=$(sed "s/'/''/g" <<< "$2")
     local proof_state_esc=$(sed "s/'/''/g" <<< "$3") framework_esc=$(sed "s/'/''/g" <<< "$4")
-    local reasoning_log_esc=$(sed "s/'/''/g" <<< "$6")
-    sqlite3 "$AI_DB" "INSERT INTO memories (prompt, response, task_id, proof_state, framework, complexity, reasoning_log) VALUES (
-      '$prompt_esc', '[XOR$(printf "%d" "0x$(echo -n "$2" | sha256sum | cut -c1-8)")] $response_esc', '$PROOF_TASK_ID',
-      '$proof_state_esc', '$framework_esc', $5, '$reasoning_log_esc'
-    );" 2>/dev/null
+    local complexity_val="$5" reasoning_log_esc=$(sed "s/'/''/g" <<< "$6")
+    sqlite3 "$AI_DB" <<EOF
+INSERT INTO memories (prompt, response, task_id, proof_state, framework, complexity, reasoning_log)
+VALUES (
+  '$prompt_esc', '[XOR$(printf "%d" "0x$(echo -n "$2" | sha256sum | cut -c1-8)")] $response_esc',
+  '$PROOF_TASK_ID', '$proof_state_esc', '$framework_esc', $complexity_val, '$reasoning_log_esc'
+);
+EOF
 }
 add_blob() { sqlite3 "$BLOBS_DB" "INSERT INTO blobs (filename,content) VALUES ('$1','$(sed "s/'/''/g" <<< "$2")');"; }
 run_ollama_json() { "$OLLAMA_BIN" run "$1" --format=json --keepalive=3200m "$2"; }
@@ -194,17 +206,84 @@ highlight_file() {
     fi
 }
 
+# -------------------- ## NEW ## Dynamic Model Selection --------------------
+_select_dynamic_models() {
+    local framework="$1"
+    local complexity="$2"
+    local POOL_SIZE=3 # Select the top 3 models for the task
+
+    thinking "Selecting dynamic model pool for task..." 1
+    
+    local available_models
+    mapfile -t available_models < <("$OLLAMA_BIN" list | awk 'NR>1 {print $1}')
+    
+    if [[ ${#available_models[@]} -eq 0 ]]; then
+        log_event "ERROR" "No Ollama models found. Please run 'ollama pull <model>'."
+        POOL_MODELS=("${DEFAULT_POOL_MODELS[@]}") # Fallback
+        return
+    fi
+
+    declare -A model_scores
+    local reasoning_text="Scoring available models based on historical performance:\n"
+
+    for model in "${available_models[@]}"; do
+        local query="
+            SELECT SUM(
+                CASE T1.proof_state
+                    WHEN 'CONVERGED' THEN 3 * T1.complexity
+                    ELSE -1 * T1.complexity
+                END
+            )
+            FROM memories AS T1
+            JOIN model_usage AS T2 ON T1.task_id = T2.task_id
+            WHERE T2.model_name = '${model}' AND T1.framework LIKE '%${framework}%';
+        "
+        local score
+        score=$(sqlite3 "$AI_DB" "$query" 2>/dev/null)
+        model_scores["$model"]=${score:-0} # Default to 0 if no history
+        reasoning_text+="  - Model: ${model}, Score: ${model_scores[$model]}\n"
+    done
+
+    # Sort models by score and select the top N
+    local sorted_models_str
+    sorted_models_str=$(for model in "${!model_scores[@]}"; do
+        printf "%s %s\n" "${model_scores[$model]}" "$model"
+    done | sort -rn | head -n "$POOL_SIZE" | awk '{print $2}')
+
+    mapfile -t POOL_MODELS < <(echo "$sorted_models_str")
+
+    if [[ ${#POOL_MODELS[@]} -lt $POOL_SIZE ]] && [[ ${#POOL_MODELS[@]} -lt ${#available_models[@]} ]]; then
+        reasoning_text+="\nNot enough historical data; filling pool with other available models.\n"
+        for model in "${available_models[@]}"; do
+            if [[ ! " ${POOL_MODELS[*]} " =~ " ${model} " ]]; then
+                POOL_MODELS+=("$model")
+                if [[ ${#POOL_MODELS[@]} -ge $POOL_SIZE ]]; then break; fi
+            fi
+        done
+    fi
+    
+    reasoning_text+="\nSelected dynamic pool for this run: ${POOL_MODELS[*]}"
+    show_reasoning "$reasoning_text" "Dynamic Model Selection"
+}
+
+_update_model_usage() {
+    thinking "Logging model usage for this task..." 2
+    for model in "${POOL_MODELS[@]}"; do
+        sqlite3 "$AI_DB" "INSERT OR IGNORE INTO model_usage (task_id, model_name) VALUES ('$PROOF_TASK_ID', '$model');"
+    done
+}
+
 # -------------------- Consensus Iteration --------------------
 _run_consensus_iteration() {
-    local -n models="$1" local -n weights="$2" local prompt="$3" local iter="$4"
+    local prompt="$1" iter="$2"
     local fused_output="" model_reasoning=""
-    for model in "${models[@]}"; do
+    for model in "${POOL_MODELS[@]}"; do
         thinking "Querying model $model..." 2
         log_event "DEBUG" "Querying model: $model (Iter $iter)"
         local json data
         json=$(run_ollama_json "$model" "$prompt") || { log_event "WARN" "Model $model failed on iteration $iter."; continue; }
         data="$json"
-        local weight="${weights[$model]:-1}"
+        local weight="${MODEL_WEIGHTS[$model]:-1}"
         for ((w=1; w<=weight; w++)); do fused_output+="$data"$'\n'; done
         model_reasoning+="$model contributed ${weight}x. "
     done
@@ -212,26 +291,36 @@ _run_consensus_iteration() {
     echo "$fused_output"
 }
 
-# -------------------- AI Loop (The 'run' command's core) --------------------
+# -------------------- AI Loop (The 'run' command's core - ## MODIFIED ##) --------------------
 run_ai_loop() {
     local initial_prompt="$1" FORCE_EDIT="${FORCE_EDIT:-false}"
     local IMPORT_URLS=("${IMPORT_URLS[@]:-}") MAX_LOOPS=3
+    
+    # --- Initialization and Context Setup ---
     PROOF_TASK_ID=$(gen_task_id "$initial_prompt")
     PROOF_CYCLE_INDEX=0; PROOF_NET_WORTH_INDEX=0
     local current_context="$initial_prompt" last_fused_output="" converged=0
+    
     detect_frameworks "$initial_prompt"; calculate_complexity "$initial_prompt"
     log_event "TASK_START" "Prompt: $initial_prompt" "TaskID: $PROOF_TASK_ID, Complexity: $PROOF_COMPLEXITY, Frameworks: $PROOF_FRAMEWORKS"
+    
+    # --- ## NEW ##: DYNAMICALLY SELECT MODELS ---
+    _select_dynamic_models "$PROOF_FRAMEWORKS" "$PROOF_COMPLEXITY"
+
     if [[ ${#IMPORT_URLS[@]} -gt 0 ]]; then
         thinking "Importing URLs into context..." 1
         for url in "${IMPORT_URLS[@]}"; do _cmd_import "$url"; done
     fi
+    
     echo -e "\n${COLOR_BRIGHT}${COLOR_MAGENTA}🎯 STARTING AI LOOP (Task ID: $PROOF_TASK_ID)$COLOR_RESET"
-    echo -e "${COLOR_GRAY}Complexity: $PROOF_COMPLEXITY | Target: $PROOF_FRAMEWORKS$COLOR_RESET\n"
+    echo -e "${COLOR_GRAY}Complexity: $PROOF_COMPLEXITY | Target: $PROOF_FRAMEWORKS | Dynamic Pool: ${POOL_MODELS[*]}$COLOR_RESET\n"
+    
+    # --- Recursive Consensus Loop ---
     for ((i=1; i<=MAX_LOOPS; i++)); do
         echo -e "\n${COLOR_CYAN}[AI LOOP $i/$MAX_LOOPS]$COLOR_RESET"
         thinking "Running consensus iteration $i..." 1
         local consensus_output
-        consensus_output=$(_run_consensus_iteration POOL_MODELS MODEL_WEIGHTS "$current_context" "$i")
+        consensus_output=$(_run_consensus_iteration "$current_context" "$i")
         local reasoning="Initial pass. Checking for convergence." is_converged=0 current_proof_state="DIVERGED"
         if [[ "$consensus_output" == "$last_fused_output" ]] && [[ -n "$consensus_output" ]]; then
             is_converged=1; current_proof_state="CONVERGED"
@@ -244,10 +333,17 @@ run_ai_loop() {
         last_fused_output="$consensus_output"
         current_context="$initial_prompt"$'\n\n'"--- Previous Consensus Output for Refinement ---"$'\n'"$consensus_output"
     done
+    
+    # --- Finalization and Logging ---
     thinking "Finalizing task and generating artifacts..." 1
     local final_content="$last_fused_output"
     local final_state=$([[ "$converged" == 1 ]] && echo "CONVERGED" || echo "MAX_LOOPS_REACHED")
     log_event "TASK_END" "Task finished with state: $final_state" "NetWorth: $PROOF_NET_WORTH_INDEX"
+    
+    # --- ## NEW ##: Log which models were used for this task for future learning ---
+    _update_model_usage
+
+    # --- Artifact Generation (Unchanged) ---
     local file_type="default_web_triad" main_content="$final_content"
     local base_filename="$TASKS_DIR/task_${PROOF_TASK_ID}" primary_file_path=""
     if [[ "$final_content" =~ ^GENERATE_FILE: ]]; then
@@ -278,14 +374,13 @@ run_ai_loop() {
 }
 
 # ==============================================================================
-# SECTION 2: CLI COMMANDS & DISPATCHER (## REFACTORED SECTION ##)
+# SECTION 2: CLI COMMANDS & DISPATCHER
 # ==============================================================================
 
 _show_main_help() {
-    # ## MODIFIED ##: Replaced grep with printf for clean formatting.
-    printf "${COLOR_BRIGHT}SysOp-AI: A Self-Contained AI Command-Line Application${COLOR_RESET}\n\n"
-    printf "This script provides a framework for interacting with a pool of local language\n"
-    printf "models via Ollama to perform tasks, generate code, and persist its state.\n\n"
+    printf "${COLOR_BRIGHT}SysOp-AI: A Self-Contained, Self-Optimizing AI CLI${COLOR_RESET}\n\n"
+    printf "This script uses a mathematical scoring system to dynamically select the best AI\n"
+    printf "models for a given task based on their historical performance.\n\n"
     printf "${COLOR_YELLOW}USAGE:${COLOR_RESET}\n"
     printf "  sysop-ai <command> [options]\n\n"
     printf "${COLOR_YELLOW}COMMANDS:${COLOR_RESET}\n"
@@ -300,25 +395,22 @@ _show_main_help() {
 }
 
 _show_run_help() {
-    # ## NEW FUNCTION ##: Dedicated help for the 'run' command.
     printf "${COLOR_BRIGHT}Usage: sysop-ai run <prompt> [options]${COLOR_RESET}\n\n"
-    printf "Runs the main AI loop to process a prompt, converge on a solution, and generate artifacts.\n\n"
+    printf "Runs the main AI loop. It will first analyze the prompt, then dynamically select\n"
+    printf "the best-performing models from its history before starting the task.\n\n"
     printf "${COLOR_YELLOW}ARGUMENTS:${COLOR_RESET}\n"
     printf "  ${COLOR_GREEN}<prompt>${COLOR_RESET}\t The instructional text for the AI to process.\n\n"
     printf "${COLOR_YELLOW}OPTIONS:${COLOR_RESET}\n"
     printf "  ${COLOR_GREEN}--force${COLOR_RESET}\t\t Force file generation even without a 'GENERATE_CODE' directive.\n"
-    printf "  ${COLOR_GREEN}--import <url>${COLOR_RESET}\t Import a URL's content into the context before running. Can be used multiple times.\n"
+    printf "  ${COLOR_GREEN}--import <url>${COLOR_RESET}\t Import a URL's content into the context before running.\n"
     printf "  ${COLOR_GREEN}--help${COLOR_RESET}\t\t Show this help message.\n"
 }
 
 _cmd_run() {
-    # ## MODIFIED ##: More robust argument parsing loop.
     local PROMPT=""
     FORCE_EDIT=false
     IMPORT_URLS=()
     local args=()
-
-    # Separate flags from positional arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --force) FORCE_EDIT=true; shift ;;
@@ -330,22 +422,23 @@ _cmd_run() {
             *) args+=("$1"); shift ;;
         esac
     done
-
     PROMPT="${args[*]}"
     if [[ -z "$PROMPT" ]]; then
         echo "Error: 'run' command requires a prompt." >&2
         _show_run_help >&2
         exit 1
     fi
-
     run_ai_loop "$PROMPT"
 }
 
 _cmd_import() {
     if [[ $# -eq 0 ]]; then echo "Error: 'import' command requires at least one URL." >&2; exit 1; fi
     for url in "$@"; do
+        if [[ -z "$url" ]]; then
+            log_event "WARN" "Skipping empty URL argument in import command."
+            continue
+        fi
         echo -e "${COLOR_CYAN}[Importing URL]$COLOR_RESET $url"
-        # ## MODIFIED ##: Improved sanitization for filenames.
         local safe_basename
         safe_basename=$(basename "$url" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c 1-64)
         local filename="$TASKS_DIR/$safe_basename"
@@ -376,7 +469,6 @@ _cmd_blobs() {
 }
 
 _cmd_status() {
-    # ## MODIFIED ##: Using printf for clean, aligned output.
     printf "${COLOR_BRIGHT}--- SysOp-AI Status ---${COLOR_RESET}\n"
     printf "${COLOR_BLUE}  ⚙️  CONFIGURATION:${COLOR_RESET}\n"
     printf "  %-20s %s\n" "AI_HOME:" "$AI_HOME"
@@ -386,18 +478,16 @@ _cmd_status() {
     printf "  %-20s %s\n" "Verbose Thinking:" "$VERBOSE_THINKING"
     printf "  %-20s %s\n" "Show Reasoning:" "$SHOW_REASONING"
     printf "  %-20s %s s\n" "Thinking Delay:" "$THINKING_DELAY"
-    
     printf "${COLOR_BLUE}  🤖 OLLAMA STATUS:${COLOR_RESET}\n"
     if ! command -v "$OLLAMA_BIN" &>/dev/null; then
         printf "  %-20s ${COLOR_RED}%s${COLOR_RESET}\n" "Status:" "Not found or not executable"
     else
         printf "  %-20s ${COLOR_GREEN}%s${COLOR_RESET}\n" "Status:" "Found"
     fi
-    printf "  Configured Models:\n"
-    for model in "${POOL_MODELS[@]}"; do
+    printf "  Default Models Pool:\n"
+    for model in "${DEFAULT_POOL_MODELS[@]}"; do
         printf "    - %s (Weight: %s)\n" "$model" "${MODEL_WEIGHTS[$model]}"
     done
-    
     printf "${COLOR_BLUE}  💾 DATABASE SUMMARY:${COLOR_RESET}\n"
     local memory_count; memory_count=$(sqlite3 "$AI_DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
     local event_count; event_count=$(sqlite3 "$AI_DB" "SELECT COUNT(*) FROM events;" 2>/dev/null || echo 0)

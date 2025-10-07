@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-<<<<<<< HEAD
 #
 # SysOp-AI: A Self-Contained AI Command-Line Application
 #
@@ -22,115 +21,9 @@
 #
 set -euo pipefail
 IFS=$'\n\t'
-=======
-set -euo pipefail
-
-# ============================================================================
-# AI Unified CLI Template
-# Combines Ollama analyzer, WebDev orchestrator, and prompt continuation.
-# ============================================================================
-OLLAMA_HOST="http://localhost:11434"
-DEFAULT_MODEL="codellama"
-AI_SESSION_FILE="$HOME/.ai_last_session.json"
-
-# --- ANSI colors & logging ---
-COLOR_RESET="\x1b[0m"; COLOR_YELLOW="\x1b[33m"
-COLOR_GREEN="\x1b[32m"; COLOR_CYAN="\x1b[36m"
-COLOR_RED="\x1b[31m";   COLOR_BLUE="\x1b[34m"
-
-log_info()  { echo -e "${COLOR_CYAN}[INFO] $1${COLOR_RESET}" >&2; }
-log_error() { echo -e "${COLOR_RED}[ERROR] $1${COLOR_RESET}" >&2; }
-
-# ============================================================================
-# SECTION 1: Ollama-style code analysis interface
-# (fill in your real call_ollama_api implementation here)
-# ============================================================================
-call_ollama_api() {
-    local MODEL="$1"; local PROMPT="$2"; local FILE="${3:-}"
-    log_info "Simulating API call to model '$MODEL'"
-    echo "[placeholder response from $MODEL for prompt: $PROMPT, file: $FILE]"
-}
-
-# ============================================================================
-# SECTION 2: WebDev orchestrator stub
-# (replace with your Node.js subprocess logic)
-# ============================================================================
-run_webdev_task() {
-    local PROMPT="$1"
-    log_info "Simulating WebDev orchestration for prompt: $PROMPT"
-    echo "[placeholder webdev output for: $PROMPT]"
-}
-
-# ============================================================================
-# SECTION 3: Session save / resume
-# ============================================================================
-save_session() {
-    local MODEL="$1"; local PROMPT="$2"; local RESPONSE="$3"
-    jq -n --arg model "$MODEL" --arg prompt "$PROMPT" --arg response "$RESPONSE" \
-       '{model:$model, prompt:$prompt, response:$response, timestamp:now}' \
-       > "$AI_SESSION_FILE"
-}
-
-continue_session() {
-    if [[ ! -f "$AI_SESSION_FILE" ]]; then
-        log_error "No previous session found."
-        exit 1
-    fi
-    local USER_PROMPT="$1"
-    local MODEL=$(jq -r '.model' "$AI_SESSION_FILE")
-    local CONTEXT=$(jq -r '.response' "$AI_SESSION_FILE")
-    local COMBINED_PROMPT="Previous context:\n${CONTEXT}\n\nUser continuation:\n${USER_PROMPT}"
-    call_ollama_api "$MODEL" "$COMBINED_PROMPT"
-}
-
-# ============================================================================
-# SECTION 4: Analyzer entry point
-# ============================================================================
-run_analyzer() {
-    local PROMPT="$1"; local SCRIPT_PATH="$2"; local MODEL="${3:-$DEFAULT_MODEL}"
-    local RESPONSE
-    RESPONSE=$(call_ollama_api "$MODEL" "$PROMPT" "$SCRIPT_PATH")
-    save_session "$MODEL" "$PROMPT" "$RESPONSE"
-}
-
-# ============================================================================
-# SECTION 5: CLI routing
-# ============================================================================
-show_help() {
-    echo -e "${COLOR_YELLOW}Usage:${COLOR_RESET}
-      ai dex 'prompt' /path/to/script.sh [model]
-      ai dev 'web project description'
-      ai prompt 'continue last conversation'"
-}
-
-case "${1:-}" in
-    dex)
-        [[ -z "${2:-}" || -z "${3:-}" ]] && { show_help; exit 1; }
-        run_analyzer "$2" "$3" "${4:-$DEFAULT_MODEL}"
-        ;;
-    dev)
-        [[ -z "${2:-}" ]] && { show_help; exit 1; }
-        run_webdev_task "$2"
-        ;;
-    prompt)
-        [[ -z "${2:-}" ]] && { show_help; exit 1; }
-        continue_session "$2"
-        ;;
-    *)
-        show_help
-        ;;
-esac
-
-// Enhanced WebDev Code-Engine with Working Color Implementation
-import { exec } from 'child_process';
-import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import sqlite3 from 'sqlite3';
->>>>>>> 051132d49003487fb706444860087269deb5a850
 
 # ==============================================================================
-# SECTION 1: CORE AI ENGINE & HELPERS (Largely Unchanged)
+# SECTION 1: CORE AI ENGINE & HELPERS
 # ==============================================================================
 
 # -------------------- Paths & Configuration --------------------
@@ -280,13 +173,24 @@ proof_cycle() {
 
 # -------------------- Helpers (Updated) --------------------
 add_memory_enhanced() {
-    local prompt_esc=$(sed "s/'/''/g" <<< "$1") response_esc=$(sed "s/'/''/g" <<< "$2")
-    local proof_state_esc=$(sed "s/'/''/g" <<< "$3") framework_esc=$(sed "s/'/''/g" <<< "$4")
+    local prompt_esc=$(sed "s/'/''/g" <<< "$1")
+    local response_esc=$(sed "s/'/''/g" <<< "$2")
+    local proof_state_esc=$(sed "s/'/''/g" <<< "$3")
+    local framework_esc=$(sed "s/'/''/g" <<< "$4")
+    local complexity_val="$5"
     local reasoning_log_esc=$(sed "s/'/''/g" <<< "$6")
-    sqlite3 "$AI_DB" "INSERT INTO memories (prompt, response, task_id, proof_state, framework, complexity, reasoning_log) VALUES (
-      '$prompt_esc', '[XOR$(printf "%d" "0x$(echo -n "$2" | sha256sum | cut -c1-8)")] $response_esc', '$PROOF_TASK_ID',
-      '$proof_state_esc', '$framework_esc', $5, '$reasoning_log_esc'
-    );" 2>/dev/null
+    sqlite3 "$AI_DB" <<EOF
+INSERT INTO memories (prompt, response, task_id, proof_state, framework, complexity, reasoning_log)
+VALUES (
+  '$prompt_esc',
+  '[XOR$(printf "%d" "0x$(echo -n "$2" | sha256sum | cut -c1-8)")] $response_esc',
+  '$PROOF_TASK_ID',
+  '$proof_state_esc',
+  '$framework_esc',
+  $complexity_val,
+  '$reasoning_log_esc'
+);
+EOF
 }
 add_blob() { sqlite3 "$BLOBS_DB" "INSERT INTO blobs (filename,content) VALUES ('$1','$(sed "s/'/''/g" <<< "$2")');"; }
 run_ollama_json() { "$OLLAMA_BIN" run "$1" --format=json --keepalive=3200m "$2"; }
@@ -301,20 +205,22 @@ highlight_file() {
     fi
 }
 
-# -------------------- Consensus Iteration --------------------
+# -------------------- Consensus Iteration (## SYNTAX FIX ##) --------------------
 _run_consensus_iteration() {
-    local -n models="$1" local -n weights="$2" local prompt="$3" local iter="$4"
+    local prompt="$1" iter="$2"
     local fused_output="" model_reasoning=""
-    for model in "${models[@]}"; do
+    for model in "${POOL_MODELS[@]}"; do
         thinking "Querying model $model..." 2
         log_event "DEBUG" "Querying model: $model (Iter $iter)"
         local json data
         json=$(run_ollama_json "$model" "$prompt") || { log_event "WARN" "Model $model failed on iteration $iter."; continue; }
         data="$json"
-        local weight="${weights[$model]:-1}"
-        for ((w=1; w<=weight; w++)); do fused_output+="$data"$'\n'; done
+        local weight="${MODEL_WEIGHTS[$model]:-1}"
+        for ((w=1; w<=weight; w++)); do
+            fused_output+="$data"$'\n'
+        done
         model_reasoning+="$model contributed ${weight}x. "
-    done
+    done # <-- This 'done' was missing
     show_reasoning "$model_reasoning" "Consensus Fusion (Iteration $iter)"
     echo "$fused_output"
 }
@@ -338,7 +244,7 @@ run_ai_loop() {
         echo -e "\n${COLOR_CYAN}[AI LOOP $i/$MAX_LOOPS]$COLOR_RESET"
         thinking "Running consensus iteration $i..." 1
         local consensus_output
-        consensus_output=$(_run_consensus_iteration POOL_MODELS MODEL_WEIGHTS "$current_context" "$i")
+        consensus_output=$(_run_consensus_iteration "$current_context" "$i")
         local reasoning="Initial pass. Checking for convergence." is_converged=0 current_proof_state="DIVERGED"
         if [[ "$consensus_output" == "$last_fused_output" ]] && [[ -n "$consensus_output" ]]; then
             is_converged=1; current_proof_state="CONVERGED"
@@ -385,11 +291,10 @@ run_ai_loop() {
 }
 
 # ==============================================================================
-# SECTION 2: CLI COMMANDS & DISPATCHER (## REFACTORED SECTION ##)
+# SECTION 2: CLI COMMANDS & DISPATCHER
 # ==============================================================================
 
 _show_main_help() {
-    # ## MODIFIED ##: Replaced grep with printf for clean formatting.
     printf "${COLOR_BRIGHT}SysOp-AI: A Self-Contained AI Command-Line Application${COLOR_RESET}\n\n"
     printf "This script provides a framework for interacting with a pool of local language\n"
     printf "models via Ollama to perform tasks, generate code, and persist its state.\n\n"
@@ -407,7 +312,6 @@ _show_main_help() {
 }
 
 _show_run_help() {
-    # ## NEW FUNCTION ##: Dedicated help for the 'run' command.
     printf "${COLOR_BRIGHT}Usage: sysop-ai run <prompt> [options]${COLOR_RESET}\n\n"
     printf "Runs the main AI loop to process a prompt, converge on a solution, and generate artifacts.\n\n"
     printf "${COLOR_YELLOW}ARGUMENTS:${COLOR_RESET}\n"
@@ -419,13 +323,10 @@ _show_run_help() {
 }
 
 _cmd_run() {
-    # ## MODIFIED ##: More robust argument parsing loop.
     local PROMPT=""
     FORCE_EDIT=false
     IMPORT_URLS=()
     local args=()
-
-    # Separate flags from positional arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --force) FORCE_EDIT=true; shift ;;
@@ -437,22 +338,23 @@ _cmd_run() {
             *) args+=("$1"); shift ;;
         esac
     done
-
     PROMPT="${args[*]}"
     if [[ -z "$PROMPT" ]]; then
         echo "Error: 'run' command requires a prompt." >&2
         _show_run_help >&2
         exit 1
     fi
-
     run_ai_loop "$PROMPT"
 }
 
 _cmd_import() {
     if [[ $# -eq 0 ]]; then echo "Error: 'import' command requires at least one URL." >&2; exit 1; fi
     for url in "$@"; do
+        if [[ -z "$url" ]]; then
+            log_event "WARN" "Skipping empty URL argument in import command."
+            continue
+        fi
         echo -e "${COLOR_CYAN}[Importing URL]$COLOR_RESET $url"
-        # ## MODIFIED ##: Improved sanitization for filenames.
         local safe_basename
         safe_basename=$(basename "$url" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c 1-64)
         local filename="$TASKS_DIR/$safe_basename"
@@ -483,7 +385,6 @@ _cmd_blobs() {
 }
 
 _cmd_status() {
-    # ## MODIFIED ##: Using printf for clean, aligned output.
     printf "${COLOR_BRIGHT}--- SysOp-AI Status ---${COLOR_RESET}\n"
     printf "${COLOR_BLUE}  ⚙️  CONFIGURATION:${COLOR_RESET}\n"
     printf "  %-20s %s\n" "AI_HOME:" "$AI_HOME"
@@ -493,7 +394,6 @@ _cmd_status() {
     printf "  %-20s %s\n" "Verbose Thinking:" "$VERBOSE_THINKING"
     printf "  %-20s %s\n" "Show Reasoning:" "$SHOW_REASONING"
     printf "  %-20s %s s\n" "Thinking Delay:" "$THINKING_DELAY"
-    
     printf "${COLOR_BLUE}  🤖 OLLAMA STATUS:${COLOR_RESET}\n"
     if ! command -v "$OLLAMA_BIN" &>/dev/null; then
         printf "  %-20s ${COLOR_RED}%s${COLOR_RESET}\n" "Status:" "Not found or not executable"
@@ -504,7 +404,6 @@ _cmd_status() {
     for model in "${POOL_MODELS[@]}"; do
         printf "    - %s (Weight: %s)\n" "$model" "${MODEL_WEIGHTS[$model]}"
     done
-    
     printf "${COLOR_BLUE}  💾 DATABASE SUMMARY:${COLOR_RESET}\n"
     local memory_count; memory_count=$(sqlite3 "$AI_DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
     local event_count; event_count=$(sqlite3 "$AI_DB" "SELECT COUNT(*) FROM events;" 2>/dev/null || echo 0)
