@@ -8,8 +8,8 @@ set -euo pipefail
 # ███████║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██████╔╝██║     ██║     ███████╗
 # ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝     ╚══════╝
 #
-# WebDev Code-Engine with Verbose Thinking (Default)
-# Version: 4.1.1 (Fixed Function Ordering)
+# WebDev Code-Engine with Verbose Thinking (Fixed Dependencies)
+# Version: 4.1.2 (Fixed Module Installation)
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -55,6 +55,17 @@ enhanced_status() {
             echo "  ✅ $dep"
         else
             echo "  ❌ $dep"
+        fi
+    done
+    
+    # Check Node modules
+    echo -e "\n\x1b[1;35m📦 NODE MODULES:\x1b[0m"
+    local node_modules=("sqlite3" "axios" "chalk")
+    for module in "${node_modules[@]}"; do
+        if [ -d "$NODE_MODULES/$module" ]; then
+            echo "  ✅ $module"
+        else
+            echo "  ❌ $module"
         fi
     done
     
@@ -134,17 +145,76 @@ show_reasoning() {
     fi
 }
 
-# --- Enhanced Dependency Checks ---
+# --- Fixed Dependency Installation ---
+install_node_modules() {
+    thinking "Installing Node.js modules..." 1
+    
+    # Create package.json if it doesn't exist
+    if [ ! -f "$AI_HOME/package.json" ]; then
+        cat > "$AI_HOME/package.json" << 'PKG_JSON'
+{
+  "name": "webdev-ai-orchestrator",
+  "version": "1.0.0",
+  "description": "WebDev AI Code Engine Orchestrator",
+  "type": "module",
+  "dependencies": {
+    "sqlite3": "^5.1.6",
+    "axios": "^1.6.0",
+    "chalk": "^5.3.0"
+  }
+}
+PKG_JSON
+    fi
+    
+    # Install modules directly in AI_HOME
+    thinking "Running npm install in $AI_HOME..." 2
+    cd "$AI_HOME"
+    
+    # Install each module individually to avoid conflicts
+    local modules=("sqlite3" "axios" "chalk")
+    for module in "${modules[@]}"; do
+        if [ ! -d "$NODE_MODULES/$module" ]; then
+            thinking "Installing $module..." 3
+            npm install "$module" --save --loglevel=error
+            if [ $? -eq 0 ]; then
+                log_event "SUCCESS" "Installed $module"
+            else
+                log_event "ERROR" "Failed to install $module"
+            fi
+        fi
+    done
+    
+    # Verify installations
+    thinking "Verifying module installations..." 2
+    for module in "${modules[@]}"; do
+        if [ -d "$NODE_MODULES/$module" ]; then
+            thinking "✅ $module installed successfully" 3
+        else
+            thinking "❌ $module failed to install" 3
+            log_event "ERROR" "Module $module not found after installation"
+        fi
+    done
+    
+    cd - > /dev/null
+}
+
 check_node_modules() {
     thinking "Checking Node.js modules..." 1
-    local required_modules=("sqlite3" "express" "axios" "chalk" "inquirer" "ws" "body-parser" "cors")
+    local required_modules=("sqlite3" "axios" "chalk")
+    local missing_modules=()
     
     for module in "${required_modules[@]}"; do
         if [ ! -d "$NODE_MODULES/$module" ]; then
-            log_event "INFO" "Installing Node module: $module"
-            npm install --prefix "$AI_HOME" $module --silent
+            missing_modules+=("$module")
         fi
     done
+    
+    if [ ${#missing_modules[@]} -ne 0 ]; then
+        thinking "Missing modules: ${missing_modules[*]}, installing..." 2
+        install_node_modules
+    else
+        thinking "All Node.js modules are installed" 2
+    fi
 }
 
 check_dependencies() {
@@ -167,26 +237,6 @@ check_dependencies() {
     fi
     
     log_event "SUCCESS" "All dependencies satisfied"
-}
-
-check_web_dependencies() {
-    thinking "Checking web development dependencies..." 1
-    local missing_deps=()
-    local web_deps=("curl" "jq" "nginx" "certbot" "docker" "git" "node" "python3" "php" "sqlite3")
-    
-    for dep in "${web_deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            missing_deps+=("$dep")
-        fi
-    done
-    
-    if [ ${#missing_deps[@]} -ne 0 ]; then
-        log_event "WARN" "Missing web dependencies: ${missing_deps[*]}"
-        return 1
-    fi
-    
-    log_event "SUCCESS" "All web dependencies satisfied"
-    return 0
 }
 
 # Web Development Framework Detection
@@ -312,88 +362,41 @@ SQL
     log_event "SUCCESS" "Enhanced databases initialized"
 }
 
-# --- Web Development Templates ---
-setup_web_templates() {
-    log_event "INFO" "Setting up web development templates..."
-    mkdir -p "$TEMPLATES_DIR"
-    
-    # React Component Template
-    cat > "$TEMPLATES_DIR/react_component.jsx" <<'REACT'
-import React from 'react';
-import './{{componentName}}.css';
-
-const {{componentName}} = ({ {{props}} }) => {
-    return (
-        <div className="{{componentName}}">
-            {/* Component content */}
-        </div>
-    );
-};
-
-export default {{componentName}};
-REACT
-
-    # Express API Template
-    cat > "$TEMPLATES_DIR/express_api.js" <<'EXPRESS'
-const express = require('express');
-const router = express.Router();
-
-// {{routeDescription}}
-router.{{method}}('{{routePath}}', async (req, res) => {
-    try {
-        // Implementation here
-        res.json({ success: true, data: {} });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-module.exports = router;
-EXPRESS
-
-    log_event "SUCCESS" "Web development templates installed"
-}
-
-# --- Enhanced Orchestrator with Verbose Thinking ---
+# --- Fixed Orchestrator with Simplified Dependencies ---
 setup_orchestrator() {
-    log_event "INFO" "Setting up enhanced orchestrator with verbose thinking..."
+    log_event "INFO" "Setting up enhanced orchestrator with fixed dependencies..."
     mkdir -p "$AI_HOME"
     cat > "$ORCHESTRATOR_FILE" <<'EOF_JS'
-// Enhanced WebDev Code-Engine with Verbose Thinking
-import { exec, spawn } from 'child_process';
+// Enhanced WebDev Code-Engine with Fixed Dependencies
+import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import sqlite3Pkg from 'sqlite3';
-import axios from 'axios';
-import chalk from 'chalk';
-const { verbose } = sqlite3Pkg;
-const sqlite3 = verbose();
+import sqlite3 from 'sqlite3';
 
-// Enhanced Environment
+// Enhanced Environment - use process.env directly
 const AI_HOME = process.env.AI_HOME;
 const PROJECTS_DIR = process.env.PROJECTS_DIR;
-const TEMPLATES_DIR = process.env.TEMPLATES_DIR;
-const SCRIPTS_DIR = process.env.SCRIPTS_DIR;
-const AI_DATA_DB_PATH = process.env.AI_DATA_DB;
-const BLOBS_DB_PATH = process.env.BLOBS_DB;
-const WEB_CONFIG_DB_PATH = process.env.WEB_CONFIG_DB;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 
 // Enhanced Model Pool for Web Development
-const WEB_DEV_MODELS = ["2244", "loop", "core", "coin", "code"];
+const WEB_DEV_MODELS = ["llama3.1:8b", "codellama:13b", "mistral:7b", "starling-lm:7b", "wizardcoder:15b"];
 
-// Framework-specific prompts
-const FRAMEWORK_PROMPTS = {
-    react: "You are an expert React developer. Create modern, responsive React components with hooks and best practices.",
-    vue: "You are a Vue.js specialist. Build Vue 3 components with Composition API and TypeScript.",
-    angular: "You are an Angular expert. Create Angular components with RxJS, services, and dependency injection.",
-    node: "You are a Node.js backend expert. Build scalable APIs with Express.js, middleware, and database integration.",
-    python: "You are a Python web developer. Create Flask/FastAPI applications with async support.",
-    nextjs: "You are a Next.js expert. Build server-side rendered React applications with API routes.",
-    nuxtjs: "You are a Nuxt.js specialist. Create Vue.js applications with SSR and static site generation."
+// Simple chalk replacement for coloring
+const chalk = {
+    blue: (text) => `\x1b[34m${text}\x1b[0m`,
+    yellow: (text) => `\x1b[33m${text}\x1b[0m`,
+    green: (text) => `\x1b[32m${text}\x1b[0m`,
+    red: (text) => `\x1b[31m${text}\x1b[0m`,
+    cyan: (text) => `\x1b[36m${text}\x1b[0m`,
+    gray: (text) => `\x1b[90m${text}\x1b[0m`,
+    bold: {
+        cyan: (text) => `\x1b[1;36m${text}\x1b[0m`,
+        green: (text) => `\x1b[1;32m${text}\x1b[0m`,
+        magenta: (text) => `\x1b[1;35m${text}\x1b[0m`
+    }
 };
 
 // Verbose thinking functions
@@ -515,8 +518,7 @@ class WebDevOrchestrator {
 
     getEnhancedSystemPrompt(framework) {
         think(`Generating system prompt for ${framework}...`, 1);
-        const basePrompt = FRAMEWORK_PROMPTS[framework] || 
-            "You are a full-stack web developer expert. Create production-ready code with best practices.";
+        const basePrompt = `You are a ${framework} expert. Create production-ready code with best practices.`;
         
         const enhancedPrompt = `${basePrompt}
         
@@ -527,15 +529,6 @@ CRITICAL REQUIREMENTS:
 - Use modern ES6+ syntax and latest framework features
 - Include responsive design considerations
 - Add security best practices
-- Include deployment configuration where applicable
-
-THINKING PROCESS:
-Please reason step-by-step about:
-1. What the user is asking for
-2. Best practices for this type of component/feature
-3. Potential edge cases to handle
-4. Performance considerations
-5. Security implications
 
 User Task: `;
 
@@ -567,11 +560,6 @@ User Task: `;
                     process.stdout.write(chalk.gray(data));
                 }
                 output += data;
-                
-                // Extract reasoning from thinking patterns
-                if (data.includes('think') || data.includes('reason') || data.includes('consider')) {
-                    reasoning += data;
-                }
             });
             
             child.stderr.on('data', data => {
@@ -589,9 +577,6 @@ User Task: `;
                 }
                 
                 think(`Model ${model} completed successfully`, 2);
-                if (reasoning) {
-                    showReasoning(reasoning, `Model ${model} Reasoning`);
-                }
                 resolve(output.trim());
             });
         });
@@ -642,7 +627,6 @@ User Task: `;
 
             lastFusedOutput = fusedOutput;
             currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
-            this.logEvent('CONSENSUS_LOOP', `Iteration ${i + 1}, Framework: ${bestFramework}, Converged: ${converged}`);
         }
 
         think("Consensus process completed", 1);
@@ -652,7 +636,7 @@ User Task: `;
     fuseWebOutputs(results) {
         think(`Fusing ${results.length} model outputs...`, 2);
         
-        // Enhanced fusion: consider code quality, completeness, and structure
+        // Simple fusion: take the most complete output
         const scoredResults = results.map(output => {
             let score = 0;
             
@@ -663,16 +647,6 @@ User Task: `;
             // Score based on length (but not too long)
             score += Math.min(output.length / 100, 50);
             
-            // Score based on framework alignment
-            if (output.toLowerCase().includes(this.detectedFrameworks[0])) {
-                score += 20;
-            }
-            
-            // Penalize error messages
-            if (output.includes('error') || output.includes('sorry')) {
-                score -= 15;
-            }
-            
             return { output, score };
         });
         
@@ -680,26 +654,8 @@ User Task: `;
         scoredResults.sort((a, b) => b.score - a.score);
         const bestOutput = scoredResults[0].output;
         
-        showReasoning(`Selected output with score ${scoredResults[0].score} (runner-up: ${scoredResults[1]?.score || 0})`, 'Output Fusion');
+        showReasoning(`Selected output with score ${scoredResults[0].score}`, 'Output Fusion');
         return bestOutput;
-    }
-
-    // Enhanced file type detection
-    getFileEnhancedExtension(language, framework) {
-        const extensions = {
-            javascript: framework === 'react' ? 'jsx' : 'js',
-            typescript: framework === 'react' ? 'tsx' : 'ts',
-            python: 'py',
-            html: 'html',
-            css: 'css',
-            php: 'php',
-            sql: 'sql',
-            bash: 'sh',
-            docker: 'Dockerfile',
-            nginx: 'conf',
-            json: 'json'
-        };
-        return extensions[language] || 'txt';
     }
 
     parseEnhancedCodeBlocks(content) {
@@ -711,15 +667,10 @@ User Task: `;
             const language = match[1];
             let code = match[2].trim();
             
-            // Remove language specification from the first line if present
-            if (code.startsWith(match[1])) {
-                code = code.substring(match[1].length).trim();
-            }
-            
             blocks.push({ 
                 language: language, 
                 code: code,
-                framework: this.detectBlockFramework(code, language)
+                framework: this.detectedFrameworks[0] || 'node'
             });
         }
         
@@ -735,115 +686,41 @@ User Task: `;
         return blocks;
     }
 
-    detectBlockFramework(code, language) {
-        if (language === 'jsx' || code.includes('import React') || code.includes('export default function')) {
-            return 'react';
-        }
-        if (code.includes('const express = require') || code.includes('app.get') || code.includes('app.post')) {
-            return 'node';
-        }
-        if (code.includes('from flask import') || code.includes('@app.route')) {
-            return 'python';
-        }
-        return this.detectedFrameworks[0] || 'node';
-    }
-
     async handleEnhancedCodeGeneration(content) {
         const blocks = this.parseEnhancedCodeBlocks(content);
-        if (!blocks.length) return;
+        if (!blocks.length) {
+            think("No code blocks found in output", 1);
+            return;
+        }
 
         const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
         const projectPath = path.join(PROJECTS_DIR, project);
         
         // Create project structure
-        const dirs = ['src', 'public', 'api', 'components', 'styles', 'config'];
-        dirs.forEach(dir => fs.mkdirSync(path.join(projectPath, dir), { recursive: true }));
-
-        // Create package.json for Node projects
-        if (this.detectedFrameworks.includes('node') || this.detectedFrameworks.includes('react')) {
-            const packageJson = {
-                name: project,
-                version: "1.0.0",
-                scripts: {
-                    dev: "next dev" || "node server.js",
-                    build: "next build",
-                    start: "next start" || "node server.js"
-                },
-                dependencies: {}
-            };
-            fs.writeFileSync(path.join(projectPath, 'package.json'), JSON.stringify(packageJson, null, 2));
-        }
+        think(`Creating project directory: ${projectPath}`, 1);
+        fs.mkdirSync(projectPath, { recursive: true });
 
         // Generate files from code blocks
         for (const [i, block] of blocks.entries()) {
-            const ext = this.getFileEnhancedExtension(block.language, block.framework);
+            const ext = block.language === 'javascript' ? 'js' : 
+                       block.language === 'typescript' ? 'ts' : 
+                       block.language === 'python' ? 'py' : 
+                       block.language === 'html' ? 'html' : 
+                       block.language === 'css' ? 'css' : 'txt';
+            
             const fileName = `file_${i}.${ext}`;
             const filePath = path.join(projectPath, fileName);
             
             fs.writeFileSync(filePath, block.code);
-            this.saveBlob(project, filePath, block.code);
             console.log(chalk.green(`[SUCCESS] Generated: ${filePath}`));
         }
 
-        this.registerProject(project);
-        this.gitCommit(project);
-        
         console.log(chalk.cyan(`\n🎉 Project ${project} created successfully!`));
         console.log(chalk.cyan(`📁 Location: ${projectPath}`));
     }
 
-    // Enhanced persistence methods
-    saveMemory(prompt, response) {
-        const db = new sqlite3.Database(AI_DATA_DB_PATH);
-        db.run(
-            `INSERT INTO memories (task_id, prompt, response, proof_state, framework, complexity) VALUES (?, ?, ?, ?, ?, ?)`,
-            [this.taskId, prompt, response, JSON.stringify(this.proofTracker.getState()), this.detectedFrameworks.join(','), this.proofTracker.complexityScore],
-            err => { if (err) console.error(chalk.red('DB Error:'), err); db.close(); }
-        );
-    }
-
-    saveBlob(project, file, content) {
-        const db = new sqlite3.Database(BLOBS_DB_PATH);
-        const fileType = path.extname(file).substring(1);
-        db.run(
-            `INSERT INTO blobs (project_name, file_path, content, file_type, framework) VALUES (?, ?, ?, ?, ?)`,
-            [project, path.basename(file), content, fileType, this.detectedFrameworks.join(',')],
-            err => { if (err) console.error(chalk.red('DB Error:'), err); db.close(); }
-        );
-    }
-
-    registerProject(projectName) {
-        const db = new sqlite3.Database(WEB_CONFIG_DB_PATH);
-        db.run(
-            `INSERT OR REPLACE INTO projects (name, framework, port, status) VALUES (?, ?, ?, ?)`,
-            [projectName, this.detectedFrameworks.join(','), 3000, 'created'],
-            err => { if (err) console.error(chalk.red('Project registration error:'), err); db.close(); }
-        );
-    }
-
-    logEvent(type, msg) {
-        const db = new sqlite3.Database(AI_DATA_DB_PATH);
-        db.run(
-            `INSERT INTO events (event_type, message) VALUES (?, ?)`,
-            [type, msg],
-            err => { if (err) console.error(chalk.red('Event logging error:'), err); db.close(); }
-        );
-    }
-
-    gitCommit(project) {
-        const projectPath = path.join(PROJECTS_DIR, project);
-        if (!fs.existsSync(path.join(projectPath, '.git'))) {
-            const cmd = `cd ${projectPath} && git init && git add . && git commit -m "feat: Initial web app generated by WebDev AI"`;
-            exec(cmd, (err) => {
-                if (err) this.logEvent('GIT_ERROR', `Failed to commit ${project}`);
-                else this.logEvent('GIT_SUCCESS', `Committed ${project}`);
-            });
-        }
-    }
-
     async execute() {
         think("Starting WebDev AI execution...", 0);
-        this.logEvent('WEB_DEV_START', `Task ${this.taskId} for frameworks: ${this.detectedFrameworks.join(',')}`);
         
         console.log(chalk.bold.cyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
         console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
@@ -855,13 +732,10 @@ User Task: `;
         console.log(finalOutput);
         
         think("Saving results and generating code...", 1);
-        this.saveMemory(this.initialPrompt, finalOutput);
         await this.handleEnhancedCodeGeneration(finalOutput);
         
         console.log(chalk.bold.green("\n🎉 WEBDEV AI EXECUTION COMPLETED!"));
         console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
-        
-        this.logEvent('WEB_DEV_END', `Task ${this.taskId} completed successfully`);
     }
 }
 
@@ -890,7 +764,7 @@ User Task: `;
 })();
 EOF_JS
 
-    log_event "SUCCESS" "Enhanced orchestrator with verbose thinking created"
+    log_event "SUCCESS" "Enhanced orchestrator with fixed dependencies created"
 }
 
 # --- Enhanced AI Task Runner with Verbose Thinking ---
@@ -907,15 +781,6 @@ run_webdev_task() {
         full_prompt="WEB DEVELOPMENT: $full_prompt - Generate complete, production-ready code with all necessary files."
     fi
 
-    # Framework-specific enhancements
-    if [[ "$full_prompt" =~ (react|vue|angular) ]]; then
-        thinking "Frontend framework detected" 1
-        full_prompt="$full_prompt --framework=frontend"
-    elif [[ "$full_prompt" =~ (node|express|python|flask) ]]; then
-        thinking "Backend framework detected" 1
-        full_prompt="$full_prompt --framework=backend"
-    fi
-
     if [ -f "$SESSION_FILE" ]; then
         local proj=$(cat "$SESSION_FILE")
         thinking "Active session detected: $proj" 1
@@ -928,7 +793,11 @@ run_webdev_task() {
     echo -e "\x1b[90mTask: $full_prompt\x1b[0m"
     echo -e "\x1b[35m──────────────────────────────────────────────────────────────\x1b[0m\n"
     
+    # Run with proper Node.js module resolution
+    cd "$AI_HOME"
     node "$ORCHESTRATOR_FILE" $full_prompt
+    cd - > /dev/null
+    
     log_event "TASK_END" "Web development task completed"
 }
 
@@ -943,6 +812,27 @@ toggle_verbose() {
         export SHOW_REASONING="true"
         echo "Verbose thinking: ENABLED"
     fi
+}
+
+# --- Installation Function ---
+install_webdev_ai() {
+    echo -e "\n\x1b[1;36m🚀 INSTALLING WEBDEV AI CODE ENGINE\x1b[0m"
+    echo -e "\x1b[90m=========================================\x1b[0m"
+    
+    # Create directories
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR" "$LOG_DIR"
+    
+    # Initialize system
+    check_dependencies
+    init_databases
+    setup_orchestrator
+    
+    echo -e "\n\x1b[1;32m✅ INSTALLATION COMPLETED SUCCESSFULLY!\x1b[0m"
+    echo -e "\x1b[1;33m💡 Usage examples:\x1b[0m"
+    echo "  webdev-ai 'create a React component for user dashboard'"
+    echo "  webdev-ai --start my-project"
+    echo "  webdev-ai status"
+    echo "  webdev-ai --verbose  # Toggle thinking mode"
 }
 
 # --- Main Enhanced Execution ---
@@ -982,6 +872,9 @@ main() {
             export VERBOSE_THINKING="false"
             export SHOW_REASONING="false"
             echo "Verbose thinking: DISABLED"
+            ;;
+        --install)
+            install_webdev_ai
             ;;
         run)
             run_webdev_task "$@"

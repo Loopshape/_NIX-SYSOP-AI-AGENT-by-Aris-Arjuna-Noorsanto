@@ -1,22 +1,13 @@
-// Enhanced WebDev Code-Engine with Verbose Thinking
-import { exec, spawn } from 'child_process';
+// Enhanced WebDev Code-Engine with Fixed Dependencies
+import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import sqlite3Pkg from 'sqlite3';
-import axios from 'axios';
-import chalk from 'chalk';
-const { verbose } = sqlite3Pkg;
-const sqlite3 = verbose();
+import sqlite3 from 'sqlite3';
 
-// Enhanced Environment
+// Enhanced Environment - use process.env directly
 const AI_HOME = process.env.AI_HOME;
 const PROJECTS_DIR = process.env.PROJECTS_DIR;
-const TEMPLATES_DIR = process.env.TEMPLATES_DIR;
-const SCRIPTS_DIR = process.env.SCRIPTS_DIR;
-const AI_DATA_DB_PATH = process.env.AI_DATA_DB;
-const BLOBS_DB_PATH = process.env.BLOBS_DB;
-const WEB_CONFIG_DB_PATH = process.env.WEB_CONFIG_DB;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
@@ -24,15 +15,19 @@ const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 // Enhanced Model Pool for Web Development
 const WEB_DEV_MODELS = ["llama3.1:8b", "codellama:13b", "mistral:7b", "starling-lm:7b", "wizardcoder:15b"];
 
-// Framework-specific prompts
-const FRAMEWORK_PROMPTS = {
-    react: "You are an expert React developer. Create modern, responsive React components with hooks and best practices.",
-    vue: "You are a Vue.js specialist. Build Vue 3 components with Composition API and TypeScript.",
-    angular: "You are an Angular expert. Create Angular components with RxJS, services, and dependency injection.",
-    node: "You are a Node.js backend expert. Build scalable APIs with Express.js, middleware, and database integration.",
-    python: "You are a Python web developer. Create Flask/FastAPI applications with async support.",
-    nextjs: "You are a Next.js expert. Build server-side rendered React applications with API routes.",
-    nuxtjs: "You are a Nuxt.js specialist. Create Vue.js applications with SSR and static site generation."
+// Simple chalk replacement for coloring
+const chalk = {
+    blue: (text) => `\x1b[34m${text}\x1b[0m`,
+    yellow: (text) => `\x1b[33m${text}\x1b[0m`,
+    green: (text) => `\x1b[32m${text}\x1b[0m`,
+    red: (text) => `\x1b[31m${text}\x1b[0m`,
+    cyan: (text) => `\x1b[36m${text}\x1b[0m`,
+    gray: (text) => `\x1b[90m${text}\x1b[0m`,
+    bold: {
+        cyan: (text) => `\x1b[1;36m${text}\x1b[0m`,
+        green: (text) => `\x1b[1;32m${text}\x1b[0m`,
+        magenta: (text) => `\x1b[1;35m${text}\x1b[0m`
+    }
 };
 
 // Verbose thinking functions
@@ -154,8 +149,7 @@ class WebDevOrchestrator {
 
     getEnhancedSystemPrompt(framework) {
         think(`Generating system prompt for ${framework}...`, 1);
-        const basePrompt = FRAMEWORK_PROMPTS[framework] || 
-            "You are a full-stack web developer expert. Create production-ready code with best practices.";
+        const basePrompt = `You are a ${framework} expert. Create production-ready code with best practices.`;
         
         const enhancedPrompt = `${basePrompt}
         
@@ -166,15 +160,6 @@ CRITICAL REQUIREMENTS:
 - Use modern ES6+ syntax and latest framework features
 - Include responsive design considerations
 - Add security best practices
-- Include deployment configuration where applicable
-
-THINKING PROCESS:
-Please reason step-by-step about:
-1. What the user is asking for
-2. Best practices for this type of component/feature
-3. Potential edge cases to handle
-4. Performance considerations
-5. Security implications
 
 User Task: `;
 
@@ -206,11 +191,6 @@ User Task: `;
                     process.stdout.write(chalk.gray(data));
                 }
                 output += data;
-                
-                // Extract reasoning from thinking patterns
-                if (data.includes('think') || data.includes('reason') || data.includes('consider')) {
-                    reasoning += data;
-                }
             });
             
             child.stderr.on('data', data => {
@@ -228,9 +208,6 @@ User Task: `;
                 }
                 
                 think(`Model ${model} completed successfully`, 2);
-                if (reasoning) {
-                    showReasoning(reasoning, `Model ${model} Reasoning`);
-                }
                 resolve(output.trim());
             });
         });
@@ -281,7 +258,6 @@ User Task: `;
 
             lastFusedOutput = fusedOutput;
             currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
-            this.logEvent('CONSENSUS_LOOP', `Iteration ${i + 1}, Framework: ${bestFramework}, Converged: ${converged}`);
         }
 
         think("Consensus process completed", 1);
@@ -291,7 +267,7 @@ User Task: `;
     fuseWebOutputs(results) {
         think(`Fusing ${results.length} model outputs...`, 2);
         
-        // Enhanced fusion: consider code quality, completeness, and structure
+        // Simple fusion: take the most complete output
         const scoredResults = results.map(output => {
             let score = 0;
             
@@ -302,16 +278,6 @@ User Task: `;
             // Score based on length (but not too long)
             score += Math.min(output.length / 100, 50);
             
-            // Score based on framework alignment
-            if (output.toLowerCase().includes(this.detectedFrameworks[0])) {
-                score += 20;
-            }
-            
-            // Penalize error messages
-            if (output.includes('error') || output.includes('sorry')) {
-                score -= 15;
-            }
-            
             return { output, score };
         });
         
@@ -319,26 +285,8 @@ User Task: `;
         scoredResults.sort((a, b) => b.score - a.score);
         const bestOutput = scoredResults[0].output;
         
-        showReasoning(`Selected output with score ${scoredResults[0].score} (runner-up: ${scoredResults[1]?.score || 0})`, 'Output Fusion');
+        showReasoning(`Selected output with score ${scoredResults[0].score}`, 'Output Fusion');
         return bestOutput;
-    }
-
-    // Enhanced file type detection
-    getFileEnhancedExtension(language, framework) {
-        const extensions = {
-            javascript: framework === 'react' ? 'jsx' : 'js',
-            typescript: framework === 'react' ? 'tsx' : 'ts',
-            python: 'py',
-            html: 'html',
-            css: 'css',
-            php: 'php',
-            sql: 'sql',
-            bash: 'sh',
-            docker: 'Dockerfile',
-            nginx: 'conf',
-            json: 'json'
-        };
-        return extensions[language] || 'txt';
     }
 
     parseEnhancedCodeBlocks(content) {
@@ -350,15 +298,10 @@ User Task: `;
             const language = match[1];
             let code = match[2].trim();
             
-            // Remove language specification from the first line if present
-            if (code.startsWith(match[1])) {
-                code = code.substring(match[1].length).trim();
-            }
-            
             blocks.push({ 
                 language: language, 
                 code: code,
-                framework: this.detectBlockFramework(code, language)
+                framework: this.detectedFrameworks[0] || 'node'
             });
         }
         
@@ -374,115 +317,41 @@ User Task: `;
         return blocks;
     }
 
-    detectBlockFramework(code, language) {
-        if (language === 'jsx' || code.includes('import React') || code.includes('export default function')) {
-            return 'react';
-        }
-        if (code.includes('const express = require') || code.includes('app.get') || code.includes('app.post')) {
-            return 'node';
-        }
-        if (code.includes('from flask import') || code.includes('@app.route')) {
-            return 'python';
-        }
-        return this.detectedFrameworks[0] || 'node';
-    }
-
     async handleEnhancedCodeGeneration(content) {
         const blocks = this.parseEnhancedCodeBlocks(content);
-        if (!blocks.length) return;
+        if (!blocks.length) {
+            think("No code blocks found in output", 1);
+            return;
+        }
 
         const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
         const projectPath = path.join(PROJECTS_DIR, project);
         
         // Create project structure
-        const dirs = ['src', 'public', 'api', 'components', 'styles', 'config'];
-        dirs.forEach(dir => fs.mkdirSync(path.join(projectPath, dir), { recursive: true }));
-
-        // Create package.json for Node projects
-        if (this.detectedFrameworks.includes('node') || this.detectedFrameworks.includes('react')) {
-            const packageJson = {
-                name: project,
-                version: "1.0.0",
-                scripts: {
-                    dev: "next dev" || "node server.js",
-                    build: "next build",
-                    start: "next start" || "node server.js"
-                },
-                dependencies: {}
-            };
-            fs.writeFileSync(path.join(projectPath, 'package.json'), JSON.stringify(packageJson, null, 2));
-        }
+        think(`Creating project directory: ${projectPath}`, 1);
+        fs.mkdirSync(projectPath, { recursive: true });
 
         // Generate files from code blocks
         for (const [i, block] of blocks.entries()) {
-            const ext = this.getFileEnhancedExtension(block.language, block.framework);
+            const ext = block.language === 'javascript' ? 'js' : 
+                       block.language === 'typescript' ? 'ts' : 
+                       block.language === 'python' ? 'py' : 
+                       block.language === 'html' ? 'html' : 
+                       block.language === 'css' ? 'css' : 'txt';
+            
             const fileName = `file_${i}.${ext}`;
             const filePath = path.join(projectPath, fileName);
             
             fs.writeFileSync(filePath, block.code);
-            this.saveBlob(project, filePath, block.code);
             console.log(chalk.green(`[SUCCESS] Generated: ${filePath}`));
         }
 
-        this.registerProject(project);
-        this.gitCommit(project);
-        
         console.log(chalk.cyan(`\n🎉 Project ${project} created successfully!`));
         console.log(chalk.cyan(`📁 Location: ${projectPath}`));
     }
 
-    // Enhanced persistence methods
-    saveMemory(prompt, response) {
-        const db = new sqlite3.Database(AI_DATA_DB_PATH);
-        db.run(
-            `INSERT INTO memories (task_id, prompt, response, proof_state, framework, complexity) VALUES (?, ?, ?, ?, ?, ?)`,
-            [this.taskId, prompt, response, JSON.stringify(this.proofTracker.getState()), this.detectedFrameworks.join(','), this.proofTracker.complexityScore],
-            err => { if (err) console.error(chalk.red('DB Error:'), err); db.close(); }
-        );
-    }
-
-    saveBlob(project, file, content) {
-        const db = new sqlite3.Database(BLOBS_DB_PATH);
-        const fileType = path.extname(file).substring(1);
-        db.run(
-            `INSERT INTO blobs (project_name, file_path, content, file_type, framework) VALUES (?, ?, ?, ?, ?)`,
-            [project, path.basename(file), content, fileType, this.detectedFrameworks.join(',')],
-            err => { if (err) console.error(chalk.red('DB Error:'), err); db.close(); }
-        );
-    }
-
-    registerProject(projectName) {
-        const db = new sqlite3.Database(WEB_CONFIG_DB_PATH);
-        db.run(
-            `INSERT OR REPLACE INTO projects (name, framework, port, status) VALUES (?, ?, ?, ?)`,
-            [projectName, this.detectedFrameworks.join(','), 3000, 'created'],
-            err => { if (err) console.error(chalk.red('Project registration error:'), err); db.close(); }
-        );
-    }
-
-    logEvent(type, msg) {
-        const db = new sqlite3.Database(AI_DATA_DB_PATH);
-        db.run(
-            `INSERT INTO events (event_type, message) VALUES (?, ?)`,
-            [type, msg],
-            err => { if (err) console.error(chalk.red('Event logging error:'), err); db.close(); }
-        );
-    }
-
-    gitCommit(project) {
-        const projectPath = path.join(PROJECTS_DIR, project);
-        if (!fs.existsSync(path.join(projectPath, '.git'))) {
-            const cmd = `cd ${projectPath} && git init && git add . && git commit -m "feat: Initial web app generated by WebDev AI"`;
-            exec(cmd, (err) => {
-                if (err) this.logEvent('GIT_ERROR', `Failed to commit ${project}`);
-                else this.logEvent('GIT_SUCCESS', `Committed ${project}`);
-            });
-        }
-    }
-
     async execute() {
         think("Starting WebDev AI execution...", 0);
-        this.logEvent('WEB_DEV_START', `Task ${this.taskId} for frameworks: ${this.detectedFrameworks.join(',')}`);
         
         console.log(chalk.bold.cyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
         console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
@@ -494,13 +363,10 @@ User Task: `;
         console.log(finalOutput);
         
         think("Saving results and generating code...", 1);
-        this.saveMemory(this.initialPrompt, finalOutput);
         await this.handleEnhancedCodeGeneration(finalOutput);
         
         console.log(chalk.bold.green("\n🎉 WEBDEV AI EXECUTION COMPLETED!"));
         console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
-        
-        this.logEvent('WEB_DEV_END', `Task ${this.taskId} completed successfully`);
     }
 }
 
