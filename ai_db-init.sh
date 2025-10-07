@@ -7,24 +7,24 @@ AI_HOME="$HOME/.local_ai"
 DB="$AI_HOME/core.db"
 
 if [ $# -lt 1 ]; then
-    echo "Usage: ai_add_module <module_name> [module_script_path]"
-    exit 1
+	echo "Usage: ai_add_module <module_name> [module_script_path]"
+	exit 1
 fi
 
 MODULE_NAME="$1"
 SCRIPT_PATH="${2:-}"
 
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then
-    echo "[ERROR] File not found: $SCRIPT_PATH"
-    exit 1
+	echo "[ERROR] File not found: $SCRIPT_PATH"
+	exit 1
 fi
 
 # Read script as blob
 if [ -n "$SCRIPT_PATH" ]; then
-    SCRIPT_CONTENT=$(<"$SCRIPT_PATH")
+	SCRIPT_CONTENT=$(<"$SCRIPT_PATH")
 else
-    # empty placeholder
-    SCRIPT_CONTENT=""
+	# empty placeholder
+	SCRIPT_CONTENT=""
 fi
 
 # Insert or replace into DB

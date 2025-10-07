@@ -20,25 +20,25 @@ mkdir -p "$LOGS"
 # Start Ollama server (single instance)
 # -----------------------------
 if ! pgrep -x ollama >/dev/null 2>&1; then
-    echo "[INFO] Starting Ollama server..."
-    nohup ollama serve >"$LOGS/ollama_server.log" 2>&1 &
+	echo "[INFO] Starting Ollama server..."
+	nohup ollama serve >"$LOGS/ollama_server.log" 2>&1 &
 else
-    echo "[INFO] Ollama server already running."
+	echo "[INFO] Ollama server already running."
 fi
 
 # -----------------------------
 # Ensure dependencies installed (only mandatory)
 # -----------------------------
 if ! command -v python3 >/dev/null 2>&1; then
-    echo "[INFO] Installing python3-full..."
-    sudo apt update && sudo apt install -y python3-full
+	echo "[INFO] Installing python3-full..."
+	sudo apt update && sudo apt install -y python3-full
 fi
 
 for dep in sqlite3 git curl wget nodejs build-essential; do
-    if ! command -v "$dep" >/dev/null 2>&1; then
-        echo "[INFO] Installing $dep..."
-        sudo apt install -y "$dep"
-    fi
+	if ! command -v "$dep" >/dev/null 2>&1; then
+		echo "[INFO] Installing $dep..."
+		sudo apt install -y "$dep"
+	fi
 done
 
 # -----------------------------
@@ -51,7 +51,7 @@ python3 "$AI_BIN" "__self_heal__" >/dev/null 2>&1 || true
 # Launch CLI
 # -----------------------------
 if [[ $# -gt 0 ]]; then
-    "$AI_BIN" "$*"
+	"$AI_BIN" "$*"
 else
-    echo "Usage: $0 '<your query>'"
+	echo "Usage: $0 '<your query>'"
 fi

@@ -17,54 +17,54 @@ export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
 
 # ----------------- Node self-healing -----------------
 check_node_modules() {
-    if ! node -e "import('sqlite3')" &>/dev/null; then
-        echo "[INFO] Node module 'sqlite3' missing. Installing..."
-        npm install --prefix "$AI_HOME" sqlite3
-    fi
+	if ! node -e "import('sqlite3')" &>/dev/null; then
+		echo "[INFO] Node module 'sqlite3' missing. Installing..."
+		npm install --prefix "$AI_HOME" sqlite3
+	fi
 }
 
 # ----------------- Report dependencies -----------------
 report_dependencies() {
-    echo "--- Nemodian AI Self-Healing Report ---"
-    echo "Node.js         : $(node -v)"
-    echo "npm             : $(npm -v)"
-    check_node_modules
-    echo "Node modules    : OK"
-    echo "SQLite3         : $(sqlite3 --version 2>/dev/null || echo 'missing')"
-    if command -v ollama >/dev/null 2>&1; then
-        echo "Ollama CLI      : $(ollama --help | head -n1)"
-    else
-        echo "Ollama CLI      : missing"
-    fi
-    echo "Git             : $(git --version | head -n1)"
-    echo "--------------------------------------"
+	echo "--- Nemodian AI Self-Healing Report ---"
+	echo "Node.js         : $(node -v)"
+	echo "npm             : $(npm -v)"
+	check_node_modules
+	echo "Node modules    : OK"
+	echo "SQLite3         : $(sqlite3 --version 2>/dev/null || echo 'missing')"
+	if command -v ollama >/dev/null 2>&1; then
+		echo "Ollama CLI      : $(ollama --help | head -n1)"
+	else
+		echo "Ollama CLI      : missing"
+	fi
+	echo "Git             : $(git --version | head -n1)"
+	echo "--------------------------------------"
 }
 
 # ----------------- Parse args -----------------
 if [[ $# -eq 0 ]]; then
-    report_dependencies
-    echo "Usage: ai \"task prompt\" [--project=name] [--setup] [--add-pattern]"
-    exit 0
+	report_dependencies
+	echo "Usage: ai \"task prompt\" [--project=name] [--setup] [--add-pattern]"
+	exit 0
 fi
 
 PROMPT=""
 declare -A OPTIONS
 for arg in "$@"; do
-    if [[ "$arg" == --* ]]; then
-        key="${arg%%=*}"
-        key="${key#--}"
-        value="${arg#*=}"
-        OPTIONS[$key]="$value"
-    else
-        PROMPT+="$arg "
-    fi
+	if [[ "$arg" == --* ]]; then
+		key="${arg%%=*}"
+		key="${key#--}"
+		value="${arg#*=}"
+		OPTIONS[$key]="$value"
+	else
+		PROMPT+="$arg "
+	fi
 done
 PROMPT="${PROMPT%" "}"
 
 # ----------------- Node orchestrator code -----------------
 ORCHESTRATOR=$(mktemp --suffix=.mjs)
 
-cat > "$ORCHESTRATOR" <<'EOF'
+cat >"$ORCHESTRATOR" <<'EOF'
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';

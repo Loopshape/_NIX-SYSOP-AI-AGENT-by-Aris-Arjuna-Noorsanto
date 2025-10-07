@@ -8,7 +8,7 @@ unzip ~/ollama.zip -d ~/ollama
 rm ~/ollama.zip
 
 # 3. Add Ollama CLI to PATH
-echo 'export PATH="$HOME/ollama:$PATH"' >> ~/.profile
+echo 'export PATH="$HOME/ollama:$PATH"' >>~/.profile
 export PATH="$HOME/ollama:$PATH"
 
 # 4. Test Ollama

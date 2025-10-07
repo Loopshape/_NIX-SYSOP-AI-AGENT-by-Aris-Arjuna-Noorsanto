@@ -26,13 +26,13 @@ SQL
 
 echo "[INFO] Rescanning modules directory..."
 for file in "$MODULES_DIR"/*.sh; do
-    [ -f "$file" ] || continue
-    name=$(basename "$file" .sh)
-    sqlite3 "$DB" <<SQL
+	[ -f "$file" ] || continue
+	name=$(basename "$file" .sh)
+	sqlite3 "$DB" <<SQL
 INSERT OR REPLACE INTO modules(name,path,script)
 VALUES('$name','$file','$(<"$file")');
 SQL
-    echo "[INFO] Stored module: $name"
+	echo "[INFO] Stored module: $name"
 done
 
 echo "[INFO] DB self-healing completed."

@@ -14,9 +14,9 @@ echo "Installing project dependencies..."
 npm ci || npm install
 
 if [ $? -eq 0 ]; then
-    echo "✅ Dependencies installed successfully."
+	echo "✅ Dependencies installed successfully."
 else
-    echo "❌ Dependencies installation failed. Check the npm logs."
+	echo "❌ Dependencies installation failed. Check the npm logs."
 fi
 
 # We don't need to exit here, but it's good practice

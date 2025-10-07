@@ -5,16 +5,16 @@ echo "[+] Starting SYSOP AI enhanced CLI hub installer..."
 
 # --- 1. System dependencies ---
 if command -v apt >/dev/null 2>&1; then
-    sudo apt update -y
-    sudo apt install -y python3 python3-venv python3-pip jq xdotool xclip git curl wget nodejs npm build-essential
+	sudo apt update -y
+	sudo apt install -y python3 python3-venv python3-pip jq xdotool xclip git curl wget nodejs npm build-essential
 elif command -v brew >/dev/null 2>&1; then
-    brew update
-    brew install python jq xdotool node xclip
+	brew update
+	brew install python jq xdotool node xclip
 fi
 
 # --- 2. Node.js / PM2 ---
 if ! command -v pm2 >/dev/null 2>&1; then
-    npm install -g pm2
+	npm install -g pm2
 fi
 
 # --- 3. Python virtual environment ---
@@ -29,7 +29,7 @@ pip install prompt_toolkit pygments jmespath pyyaml
 
 # --- 4. Enhanced jome-cli installation ---
 mkdir -p ~/bin
-cat > ~/bin/jome-cli <<'EOF'
+cat >~/bin/jome-cli <<'EOF'
 #!/usr/bin/env python3
 import os, sys, subprocess, json, yaml
 from pygments import highlight
@@ -126,13 +126,13 @@ chmod +x ~/bin/jome-cli
 echo "[+] Enhanced jome-cli installed at ~/bin/jome-cli"
 
 # --- 5. Environment variables ---
-echo 'export QT_QPA_PLATFORM=offscreen' >> ~/.bashrc
-echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+echo 'export QT_QPA_PLATFORM=offscreen' >>~/.bashrc
+echo 'export PATH="$HOME/bin:$PATH"' >>~/.bashrc
 source ~/.bashrc
 
 # --- 6. PM2 ecosystem ---
 mkdir -p ~/sysop_pm2
-cat > ~/sysop_pm2/ecosystem.config.js <<'EOF'
+cat >~/sysop_pm2/ecosystem.config.js <<'EOF'
 module.exports = {
   apps: [
     {

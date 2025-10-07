@@ -5,7 +5,7 @@
 export BASHRC_LOADED=1
 
 # Only interactive shells
-case $- in *i*) ;; *) return;; esac
+case $- in *i*) ;; *) return ;; esac
 
 # -------------------------------
 # History
@@ -18,11 +18,11 @@ HISTFILESIZE=10000
 # -------------------------------
 # Prompt (with colors if supported)
 # -------------------------------
-case "$TERM" in xterm-color|*-256color) color_prompt=yes;; esac
+case "$TERM" in xterm-color | *-256color) color_prompt=yes ;; esac
 if [ "$color_prompt" = yes ]; then
-    PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+	PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
 else
-    PS1='\u@\h:\w\$ '
+	PS1='\u@\h:\w\$ '
 fi
 unset color_prompt
 
@@ -30,15 +30,15 @@ unset color_prompt
 # LS colors
 # -------------------------------
 if command -v dircolors >/dev/null 2>&1; then
-    eval "$(dircolors -b ~/.dircolors 2>/dev/null || dircolors -b)"
-    alias ls='ls --color=auto'
+	eval "$(dircolors -b ~/.dircolors 2>/dev/null || dircolors -b)"
+	alias ls='ls --color=auto'
 fi
 
 # -------------------------------
 # Homebrew (Linuxbrew)
 # -------------------------------
 if [ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]; then
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+	eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 
 # -------------------------------
@@ -63,17 +63,17 @@ alias devil="pkill ollama && nohup ollama serve & nohup ollama run loop &"
 # SSH agent auto-start
 # -------------------------------
 if ! pgrep -u "$USER" ssh-agent >/dev/null 2>&1; then
-    eval "$(ssh-agent -s)"
+	eval "$(ssh-agent -s)"
 fi
 
 # -------------------------------
 # AI environment activation
 # -------------------------------
-[ -f "$HOME/.local_ai/.env.local" ] && \
-while IFS='=' read -r key value; do
-    [[ -z "$key" || "$key" =~ ^# ]] && continue
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
-done < "$HOME/.local_ai/.env.local"
+[ -f "$HOME/.local_ai/.env.local" ] &&
+	while IFS='=' read -r key value; do
+		[[ -z "$key" || "$key" =~ ^# ]] && continue
+		[[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
+	done <"$HOME/.local_ai/.env.local"
 
 [ -f "$HOME/.sysop_ai_env/bin/activate" ] && source "$HOME/.sysop_ai_env/bin/activate"
 
@@ -84,46 +84,46 @@ export MANDATORY_MODELS=("loop" "core" "2244" "coin" "code")
 
 # Wait for Ollama server to respond
 wait_for_ollama() {
-    local retries=10
-    while (( retries > 0 )); do
-        if ollama list >/dev/null 2>&1; then
-            return 0
-        fi
-        sleep 1
-        ((retries--))
-    done
-    return 1
+	local retries=10
+	while ((retries > 0)); do
+		if ollama list >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 1
+		((retries--))
+	done
+	return 1
 }
 
 # Start Ollama server if not running
 start_ollama_server() {
-    if command -v ollama >/dev/null 2>&1 && ! pgrep -x ollama >/dev/null 2>&1; then
-        mkdir -p "$HOME/logs"
-        nohup ollama serve > "$HOME/logs/ollama_server.log" 2>&1 &
-        echo "[INFO] Ollama server starting in background..."
-    fi
+	if command -v ollama >/dev/null 2>&1 && ! pgrep -x ollama >/dev/null 2>&1; then
+		mkdir -p "$HOME/logs"
+		nohup ollama serve >"$HOME/logs/ollama_server.log" 2>&1 &
+		echo "[INFO] Ollama server starting in background..."
+	fi
 }
 
 # Pull and run mandatory models
 ai_models_start() {
-    start_ollama_server
-    sleep 2
-    for model in "${MANDATORY_MODELS[@]}"; do
-        if ! ollama list | grep -q "$model"; then
-            echo "[INFO] Pulling Ollama model: $model"
-            if wait_for_ollama; then
-                ollama pull "$model" >/dev/null 2>&1
-                echo "[INFO] Model $model pull completed."
-            else
-                echo "[ERROR] Ollama server not responding. Could not pull $model."
-                continue
-            fi
-        fi
-        if ! pgrep -f "ollama run $model" >/dev/null 2>&1; then
-            nohup ollama run "$model" > "$HOME/logs/ollama_${model}.log" 2>&1 &
-#            echo "[INFO] Ollama model '$model' running in background..."
-        fi
-    done
+	start_ollama_server
+	sleep 2
+	for model in "${MANDATORY_MODELS[@]}"; do
+		if ! ollama list | grep -q "$model"; then
+			echo "[INFO] Pulling Ollama model: $model"
+			if wait_for_ollama; then
+				ollama pull "$model" >/dev/null 2>&1
+				echo "[INFO] Model $model pull completed."
+			else
+				echo "[ERROR] Ollama server not responding. Could not pull $model."
+				continue
+			fi
+		fi
+		if ! pgrep -f "ollama run $model" >/dev/null 2>&1; then
+			nohup ollama run "$model" >"$HOME/logs/ollama_${model}.log" 2>&1 &
+			#            echo "[INFO] Ollama model '$model' running in background..."
+		fi
+	done
 }
 
 # Auto-start models in background after login
@@ -133,63 +133,63 @@ ai_models_start() {
 # SysOp-AI Environment Status
 # -------------------------------
 ai_status() {
-    echo "===================== SysOp-AI Status ====================="
-    echo "User: $USER"
-    echo "Home: $HOME"
-    echo
-    # Python3 + Pygments
-    if command -v python3 >/dev/null 2>&1; then
-        echo "Python3: $(python3 --version)"
-        if python3 -m pip show Pygments >/dev/null 2>&1; then
-            echo "Pygments: Installed"
-        else
-            echo "Pygments: Not installed"
-        fi
-    else
-        echo "Python3: Not installed"
-    fi
-    # Node.js / NVM
-    if command -v node >/dev/null 2>&1; then
-        echo "NodeJS: $(node --version)"
-    else
-        echo "NodeJS: Not installed"
-    fi
-    # Ollama server
-    if pgrep -x ollama >/dev/null 2>&1; then
-        echo "Ollama server: Running"
-    else
-        echo "Ollama server: Not running"
-    fi
-    # Ollama models
-    if command -v ollama >/dev/null 2>&1; then
-        echo "Ollama models:"
-        for model in "${MANDATORY_MODELS[@]}"; do
-            if ollama list | grep -q "$model"; then
-                if pgrep -f "ollama run $model" >/dev/null 2>&1; then
-                    echo "  - $model: Running"
-                else
-                    echo "  - $model: Not running"
-                fi
-            else
-                echo "  - $model: Not pulled"
-            fi
-        done
-    fi
-    # AI environment
-    if [ -f "$HOME/.sysop_ai_env/bin/activate" ]; then
-        echo "AI environment: Active ($HOME/.sysop_ai_env)"
-    else
-        echo "AI environment: Not found"
-    fi
-    echo "============================================================"
+	echo "===================== SysOp-AI Status ====================="
+	echo "User: $USER"
+	echo "Home: $HOME"
+	echo
+	# Python3 + Pygments
+	if command -v python3 >/dev/null 2>&1; then
+		echo "Python3: $(python3 --version)"
+		if python3 -m pip show Pygments >/dev/null 2>&1; then
+			echo "Pygments: Installed"
+		else
+			echo "Pygments: Not installed"
+		fi
+	else
+		echo "Python3: Not installed"
+	fi
+	# Node.js / NVM
+	if command -v node >/dev/null 2>&1; then
+		echo "NodeJS: $(node --version)"
+	else
+		echo "NodeJS: Not installed"
+	fi
+	# Ollama server
+	if pgrep -x ollama >/dev/null 2>&1; then
+		echo "Ollama server: Running"
+	else
+		echo "Ollama server: Not running"
+	fi
+	# Ollama models
+	if command -v ollama >/dev/null 2>&1; then
+		echo "Ollama models:"
+		for model in "${MANDATORY_MODELS[@]}"; do
+			if ollama list | grep -q "$model"; then
+				if pgrep -f "ollama run $model" >/dev/null 2>&1; then
+					echo "  - $model: Running"
+				else
+					echo "  - $model: Not running"
+				fi
+			else
+				echo "  - $model: Not pulled"
+			fi
+		done
+	fi
+	# AI environment
+	if [ -f "$HOME/.sysop_ai_env/bin/activate" ]; then
+		echo "AI environment: Active ($HOME/.sysop_ai_env)"
+	else
+		echo "AI environment: Not found"
+	fi
+	echo "============================================================"
 }
 
 source /home/loop/.env.local/bin/activate
 
 # ====== Monokai-style shell prompt ======
 if [ -d "$HOME/.env.local" ]; then
-    source "$HOME/.env.local/bin/activate"
-    export VIRTUAL_ENV_PROMPT="(ai) "
+	source "$HOME/.env.local/bin/activate"
+	export VIRTUAL_ENV_PROMPT="(ai) "
 fi
 
 # Define Monokai color palette
@@ -207,8 +207,8 @@ PS1="${MONOKAI_PINK}(ai)${RESET} ${MONOKAI_GREEN}\u${RESET}@${MONOKAI_CYAN}\h${R
 
 # 1️⃣ Auto-activate venv globally
 if [ -d "$HOME/.env.local" ]; then
-    source "$HOME/.env.local/bin/activate"
-    export VIRTUAL_ENV_PROMPT="(ai) "
+	source "$HOME/.env.local/bin/activate"
+	export VIRTUAL_ENV_PROMPT="(ai) "
 fi
 
 # 2️⃣ Monokai terminal colors
@@ -229,20 +229,19 @@ PS1="${MONOKAI_PINK}(ai)${RESET} ${MONOKAI_GREEN}\u${RESET}@${MONOKAI_CYAN}\h${R
 
 # 4️⃣ AI pipeline Monokai wrapper
 function ai-monokai() {
-    ai "$@" 2>&1 | while IFS= read -r line
-    do
-        if [[ "$line" == *"[INFO]"* ]]; then
-            echo -e "${MONOKAI_CYAN}${line}${RESET}"
-        elif [[ "$line" == *"[TASK_START]"* ]]; then
-            echo -e "${MONOKAI_GREEN}${line}${RESET}"
-        elif [[ "$line" == *"[ERROR]"* ]]; then
-            echo -e "${MONOKAI_RED}${line}${RESET}"
-        elif [[ "$line" == *"Model"* ]]; then
-            echo -e "${MONOKAI_PURPLE}${line}${RESET}"
-        else
-            echo -e "${MONOKAI_GRAY}${line}${RESET}"
-        fi
-    done
+	ai "$@" 2>&1 | while IFS= read -r line; do
+		if [[ "$line" == *"[INFO]"* ]]; then
+			echo -e "${MONOKAI_CYAN}${line}${RESET}"
+		elif [[ "$line" == *"[TASK_START]"* ]]; then
+			echo -e "${MONOKAI_GREEN}${line}${RESET}"
+		elif [[ "$line" == *"[ERROR]"* ]]; then
+			echo -e "${MONOKAI_RED}${line}${RESET}"
+		elif [[ "$line" == *"Model"* ]]; then
+			echo -e "${MONOKAI_PURPLE}${line}${RESET}"
+		else
+			echo -e "${MONOKAI_GRAY}${line}${RESET}"
+		fi
+	done
 }
 
 # Alias original AI command to the Monokai wrapper
@@ -254,14 +253,14 @@ export PYGMENTS_STYLE=monokai
 # 6️⃣ Optional: IPython Monokai
 ipython_profile="$HOME/.ipython/profile_default/ipython_config.py"
 if [ ! -f "$ipython_profile" ]; then
-    ipython profile create
+	ipython profile create
 fi
-echo "c.TerminalInteractiveShell.highlighting_style = 'monokai'" >> "$ipython_profile"
-echo "c.TerminalInteractiveShell.highlighting_style_overrides = {}" >> "$ipython_profile"
+echo "c.TerminalInteractiveShell.highlighting_style = 'monokai'" >>"$ipython_profile"
+echo "c.TerminalInteractiveShell.highlighting_style_overrides = {}" >>"$ipython_profile"
 
 # 7️⃣ Jupyter Monokai (if jupyterthemes installed)
 if command -v jt >/dev/null 2>&1; then
-    jt -t monokai -fs 11 -nf ptsans -tf ptsans -ofs 11 -T -N
+	jt -t monokai -fs 11 -nf ptsans -tf ptsans -ofs 11 -T -N
 fi
 
 # ===============================================

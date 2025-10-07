@@ -5,10 +5,10 @@ AI_HOME="$HOME/.local_ai"
 PYTHON_BIN="python3"
 
 highlight_output() {
-    local text="$1"
-    local lang="$2"
+	local text="$1"
+	local lang="$2"
 
-    "$PYTHON_BIN" - <<EOF
+	"$PYTHON_BIN" - <<EOF
 import sys
 from rich.console import Console
 from rich.syntax import Syntax
@@ -21,26 +21,26 @@ EOF
 }
 
 run_ai() {
-    local prompt="$1"
-    local response
-    # replace this with your AI engine call
-    if [[ "$prompt" =~ "capital of Germany" ]]; then
-        response="The capital of Germany is Berlin."
-        lang="text"
-    elif [[ "$prompt" =~ "def " ]]; then
-        response="def greet(name):\n    return f'Hello, {name}!'"
-        lang="python"
-    else
-        response="$prompt"
-        lang="text"
-    fi
+	local prompt="$1"
+	local response
+	# replace this with your AI engine call
+	if [[ "$prompt" =~ "capital of Germany" ]]; then
+		response="The capital of Germany is Berlin."
+		lang="text"
+	elif [[ "$prompt" =~ "def " ]]; then
+		response="def greet(name):\n    return f'Hello, {name}!'"
+		lang="python"
+	else
+		response="$prompt"
+		lang="text"
+	fi
 
-    highlight_output "$response" "$lang"
+	highlight_output "$response" "$lang"
 }
 
 if [ $# -lt 1 ]; then
-    echo "Usage: ai 'your prompt'"
-    exit 1
+	echo "Usage: ai 'your prompt'"
+	exit 1
 fi
 
 run_ai "$*"
