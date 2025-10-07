@@ -1,23 +1,23 @@
-// Enhanced WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
+// AI DevOps Orchestrator (Node.js Core)
 import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 
-// Enhanced Environment
+// --- CONFIGURATION ---
 const AI_HOME = process.env.AI_HOME;
 const PROJECTS_DIR = process.env.PROJECTS_DIR;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
-const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
-const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
+const VERBOSE_THINKING = process.env.VERBOSE_THINKING === 'true';
+const SHOW_REASONING = process.env.SHOW_REASONING === 'true';
 const AI_DATA_DB = process.env.AI_DATA_DB;
 
-// Enhanced Model Pool for Web Development (Default/Fallback)
+// Default Models (Loaded from Bash config)
 const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
 const MODEL_WEIGHTS = { "2244:latest": 2, "core:latest": 2, "loop:latest": 1, "coin:latest": 1, "code:latest": 2 };
 
-// Working color implementation using template literals
+// Working color implementation (Simplified for Node.js)
 const colors = {
     reset: '\x1b[0m',
     bright: '\x1b[1m',
@@ -30,11 +30,8 @@ const colors = {
     cyan: '\x1b[36m',
     gray: '\x1b[90m',
     
-    // Combined styles
     boldCyan: (text) => `\x1b[1;36m${text}\x1b[0m`,
     boldGreen: (text) => `\x1b[1;32m${text}\x1b[0m`,
-    boldMagenta: (text) => `\x1b[1;35m${text}\x1b[0m`,
-    blueText: (text) => `\x1b[34m${text}\x1b[0m`,
     yellowText: (text) => `\x1b[33m${text}\x1b[0m`,
     greenText: (text) => `\x1b[32m${text}\x1b[0m`,
     redText: (text) => `\x1b[31m${text}\x1b[0m`,
@@ -71,7 +68,7 @@ const showReasoning = (reasoning, context = 'Reasoning') => {
     }
 };
 
-// --- Math/Hashing Helpers (Ported to Node.js) ---
+// --- Math/Hashing Helpers ---
 const genCircularIndex = () => {
     const secondsInDay = 86400;
     const now = new Date();
@@ -182,7 +179,7 @@ const updateModelUsage = (taskId, modelPool) => {
     });
 };
 
-// --- WebDevProofTracker (Modified for 2π Modulo Logic) ---
+// --- Proof Tracker (Modified for 2π Modulo Logic) ---
 class WebDevProofTracker {
     constructor(initialPrompt, detectedFrameworks = [], taskId) {
         this.taskId = taskId;
@@ -429,7 +426,7 @@ User Task: `;
 
         think("Consensus process completed", 1);
         await updateModelUsage(this.taskId, this.modelPool); 
-        return lastFusedOutput;
+        return `[FINAL_ANSWER]\n${lastFusedOutput}`; // Return with FINAL_ANSWER tag
     }
 
     fuseWebOutputs(results) {
@@ -543,7 +540,7 @@ User Task: `;
     }
 
     async execute() {
-        think("Starting WebDev AI execution...", 0);
+        think("Starting AI DevOps execution...", 0);
         
         // 1. Read file content if --file option is present
         if (this.options.file) {
@@ -552,20 +549,26 @@ User Task: `;
             showReasoning(`Injected file content from: ${this.options.file}`, 'File Context');
         }
 
-        console.log(colors.boldCyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
+        console.log(colors.boldCyan("\n🚀 AI DEVOPS ORCHESTRATOR STARTING..."));
         console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
         
         const finalOutput = await this.recursiveConsensus();
         
         console.log(colors.boldGreen("\n✅ TASK COMPLETED SUCCESSFULLY"));
-        console.log(colors.boldCyan("\n--- Final Web Development Output ---\n"));
+        console.log(colors.boldCyan("\n--- Final Agent Output ---\n"));
         console.log(finalOutput);
         
-        think("Saving results and generating code...", 1);
-        await this.handleEnhancedCodeGeneration(finalOutput);
+        // Only process files if the final output contains the FINAL_ANSWER tag
+        if (finalOutput.includes('[FINAL_ANSWER]')) {
+            const codeContent = finalOutput.substring(finalOutput.indexOf('[FINAL_ANSWER]') + '[FINAL_ANSWER]'.length).trim();
+            think("Saving results and generating code...", 1);
+            await this.handleEnhancedCodeGeneration(codeContent);
+        }
         
-        console.log(colors.boldGreen("\n🎉 WEBDEV AI EXECUTION COMPLETED!"));
+        console.log(colors.boldGreen("\n🎉 AI DEVOPS EXECUTION COMPLETED!"));
         console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+        
+        return finalOutput;
     }
 }
 
@@ -599,13 +602,16 @@ User Task: `;
     const prompt = positionalArgs.join(' ');
 
     if (!prompt) {
-        console.log(colors.redText('Error: No prompt provided. Usage: webdev-ai "create a react component for user dashboard"'));
-        process.exit(1);
+        // This should not happen as the Bash script handles the prompt check
+        process.exit(0);
     }
 
-    console.log(colors.boldMagenta("\n🧠 WEBDEV AI - VERBOSE THINKING MODE"));
+    console.log(colors.boldMagenta("\n🧠 AI DEVOPS - ORCHESTRATOR MODE"));
     console.log(colors.magentaText("========================================\n"));
     
     const orchestrator = new WebDevOrchestrator(prompt, options);
-    await orchestrator.execute();
+    const finalResponse = await orchestrator.execute();
+    
+    // Output the final response for the Bash script to capture
+    console.log(finalResponse);
 })();
