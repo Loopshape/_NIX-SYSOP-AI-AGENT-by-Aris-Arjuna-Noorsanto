@@ -34,7 +34,7 @@ export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
 
 # Verbose thinking configuration
 export VERBOSE_THINKING="${VERBOSE_THINKING:-true}"
-export THINKING_DELAY="${THINKING_DELAY:-0.5}"
+export THINKING_DELAY="${THINKING_DELAY:-0.12725125}"
 export SHOW_REASONING="${SHOW_REASONING:-true}"
 
 # --- Enhanced Status Function ---
