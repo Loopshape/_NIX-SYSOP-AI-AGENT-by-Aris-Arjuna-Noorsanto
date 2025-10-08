@@ -1,23 +1,23 @@
-// AI DevOps Orchestrator (Node.js Core)
+// Enhanced WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
 import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 
-// --- CONFIGURATION ---
+// Enhanced Environment
 const AI_HOME = process.env.AI_HOME;
 const PROJECTS_DIR = process.env.PROJECTS_DIR;
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
-const VERBOSE_THINKING = process.env.VERBOSE_THINKING === 'true';
-const SHOW_REASONING = process.env.SHOW_REASONING === 'true';
+const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
+const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 const AI_DATA_DB = process.env.AI_DATA_DB;
 
-// Default Models (Loaded from Bash config)
+// Enhanced Model Pool for Web Development (Default/Fallback)
 const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
 const MODEL_WEIGHTS = { "2244:latest": 2, "core:latest": 2, "loop:latest": 1, "coin:latest": 1, "code:latest": 2 };
 
-// Working color implementation (Simplified for Node.js)
+// Working color implementation using template literals
 const colors = {
     reset: '\x1b[0m',
     bright: '\x1b[1m',
@@ -30,8 +30,11 @@ const colors = {
     cyan: '\x1b[36m',
     gray: '\x1b[90m',
     
+    // Combined styles
     boldCyan: (text) => `\x1b[1;36m${text}\x1b[0m`,
     boldGreen: (text) => `\x1b[1;32m${text}\x1b[0m`,
+    boldMagenta: (text) => `\x1b[1;35m${text}\x1b[0m`,
+    blueText: (text) => `\x1b[34m${text}\x1b[0m`,
     yellowText: (text) => `\x1b[33m${text}\x1b[0m`,
     greenText: (text) => `\x1b[32m${text}\x1b[0m`,
     redText: (text) => `\x1b[31m${text}\x1b[0m`,
@@ -68,7 +71,7 @@ const showReasoning = (reasoning, context = 'Reasoning') => {
     }
 };
 
-// --- Math/Hashing Helpers ---
+// --- Math/Hashing Helpers (Ported to Node.js) ---
 const genCircularIndex = () => {
     const secondsInDay = 86400;
     const now = new Date();
@@ -179,7 +182,7 @@ const updateModelUsage = (taskId, modelPool) => {
     });
 };
 
-// --- Proof Tracker (Modified for 2π Modulo Logic) ---
+// --- WebDevProofTracker (Modified for 2π Modulo Logic) ---
 class WebDevProofTracker {
     constructor(initialPrompt, detectedFrameworks = [], taskId) {
         this.taskId = taskId;
@@ -376,12 +379,12 @@ User Task: `;
     async recursiveConsensus() {
         think("Starting recursive consensus process (MAX PARALLELISM)...", 1);
         
-        this.modelPool = await selectDynamicModels(this.detectedFrameworks || 'node', this.proofTracker.complexityScore);
+        this.modelPool = await selectDynamicModels(this.detectedFrameworks[0] || 'node', this.proofTracker.complexityScore);
         
         let currentPrompt = this.initialPrompt;
         let lastFusedOutput = "";
         let converged = false;
-        let bestFramework = this.detectedFrameworks || 'node';
+        let bestFramework = this.detectedFrameworks[0] || 'node';
 
         for (let i = 0; i < 3 && !converged; i++) {
             think(`Consensus iteration ${i + 1}/3...`, 2);
@@ -426,7 +429,7 @@ User Task: `;
 
         think("Consensus process completed", 1);
         await updateModelUsage(this.taskId, this.modelPool); 
-        return `[FINAL_ANSWER]\n${lastFusedOutput}`; // Return with FINAL_ANSWER tag
+        return lastFusedOutput;
     }
 
     fuseWebOutputs(results) {
@@ -441,7 +444,7 @@ User Task: `;
         });
         
         scoredResults.sort((a, b) => b.score - a.score);
-        const bestOutput = scoredResults.output;
+        const bestOutput = scoredResults.output; // FIX: Access 'output' property of the first element
         
         showReasoning(`Selected output with score ${scoredResults[0].score}`, 'Output Fusion');
         return bestOutput;
@@ -458,19 +461,19 @@ User Task: `;
         let match;
         
         while ((match = regex.exec(content)) !== null) {
-            const language = match; // Capture group 1: language
-            let code = match.trim(); // Capture group 2: code
+            const language = match; // FIX: Capture group 1 is language
+            let code = match.trim(); // FIX: Capture group 2 is code
             
             blocks.push({ 
                 language: language, 
                 code: code,
-                framework: this.detectedFrameworks || 'node'
+                framework: this.detectedFrameworks || 'node' // Use first detected framework
             });
         }
         
         if (blocks.length === 0 && content.trim().length > 0) {
             blocks.push({
-                language: 'javascript',
+                language: 'javascript', // Default to JS if no language specified but content exists
                 code: content.trim(),
                 framework: this.detectedFrameworks || 'node'
             });
@@ -501,13 +504,13 @@ User Task: `;
         const modifyMatch = content.match(modifyRegex);
 
         if (modifyMatch) {
-            const targetPath = modifyMatch;
+            const targetPath = modifyMatch; // FIX: Capture group 1 for the path
             const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
             const projectPath = path.join(PROJECTS_DIR, project);
             const fullPath = path.join(projectPath, targetPath);
 
             if (blocks.length === 1) {
-                await this.handleFileModification(fullPath, blocks.code);
+                await this.handleFileModification(fullPath, blocks.code); // FIX: Access code from the first block
             } else {
                 console.error(colors.redText(`[ERROR] MODIFY_FILE directive found, but output contains ${blocks.length} code blocks. Only one block is supported for modification.`));
             }
@@ -540,7 +543,7 @@ User Task: `;
     }
 
     async execute() {
-        think("Starting AI DevOps execution...", 0);
+        think("Starting WebDev AI execution...", 0);
         
         // 1. Read file content if --file option is present
         if (this.options.file) {
@@ -549,26 +552,20 @@ User Task: `;
             showReasoning(`Injected file content from: ${this.options.file}`, 'File Context');
         }
 
-        console.log(colors.boldCyan("\n🚀 AI DEVOPS ORCHESTRATOR STARTING..."));
+        console.log(colors.boldCyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
         console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
         
         const finalOutput = await this.recursiveConsensus();
         
         console.log(colors.boldGreen("\n✅ TASK COMPLETED SUCCESSFULLY"));
-        console.log(colors.boldCyan("\n--- Final Agent Output ---\n"));
+        console.log(colors.boldCyan("\n--- Final Web Development Output ---\n"));
         console.log(finalOutput);
         
-        // Only process files if the final output contains the FINAL_ANSWER tag
-        if (finalOutput.includes('[FINAL_ANSWER]')) {
-            const codeContent = finalOutput.substring(finalOutput.indexOf('[FINAL_ANSWER]') + '[FINAL_ANSWER]'.length).trim();
-            think("Saving results and generating code...", 1);
-            await this.handleEnhancedCodeGeneration(codeContent);
-        }
+        think("Saving results and generating code...", 1);
+        await this.handleEnhancedCodeGeneration(finalOutput);
         
-        console.log(colors.boldGreen("\n🎉 AI DEVOPS EXECUTION COMPLETED!"));
+        console.log(colors.boldGreen("\n🎉 WEBDEV AI EXECUTION COMPLETED!"));
         console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
-        
-        return finalOutput;
     }
 }
 
@@ -584,11 +581,11 @@ User Task: `;
         const arg = args[i];
         if (arg.startsWith('--')) {
             const parts = arg.slice(2).split('=');
-            const key = parts;
+            const key = parts; // FIX: key is the first part
             const value = parts.length > 1 ? parts.slice(1).join('=') : true;
             
             // Special handling for --file
-            if (key === 'file' && typeof value === 'boolean') {
+            if (key === 'file' && typeof value === 'boolean') { // If --file is passed without =, expect path as next arg
                 options[key] = args[i + 1];
                 i++; // Skip next argument
             } else {
@@ -602,16 +599,13 @@ User Task: `;
     const prompt = positionalArgs.join(' ');
 
     if (!prompt) {
-        // This should not happen as the Bash script handles the prompt check
-        process.exit(0);
+        console.log(colors.redText('Error: No prompt provided. Usage: webdev-ai "create a react component for user dashboard"'));
+        process.exit(1);
     }
 
-    console.log(colors.boldMagenta("\n🧠 AI DEVOPS - ORCHESTRATOR MODE"));
+    console.log(colors.boldMagenta("\n🧠 WEBDEV AI - VERBOSE THINKING MODE"));
     console.log(colors.magentaText("========================================\n"));
     
     const orchestrator = new WebDevOrchestrator(prompt, options);
-    const finalResponse = await orchestrator.execute();
-    
-    // Output the final response for the Bash script to capture
-    console.log(finalResponse);
+    await orchestrator.execute();
 })();

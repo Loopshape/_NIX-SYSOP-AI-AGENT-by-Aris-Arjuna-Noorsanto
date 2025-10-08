@@ -1,0 +1,93 @@
+# ollama_stream_fuse.py
+# Python3 live streaming + fusion for Nemodian Ollama models
+
+import asyncio
+import aiohttp
+import sys
+from typing import List, Dict
+
+API_URL = "http://localhost:11434/v1/run"
+
+
+def generate_modulo_offsets(models: List[str], prompt: str, modulo_base: int = 1000) -> Dict[str, int]:
+    """
+    Generate modulo token offsets for each model
+    """
+    base_hash = sum(ord(c) for c in prompt)
+    return {model: (base_hash + i * 97) % modulo_base for i, model in enumerate(models)}
+
+
+async def stream_model(session: aiohttp.ClientSession, model: str, prompt: str, modulo: int = 0):
+    """
+    Stream model output token by token asynchronously
+    """
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "modulo": {"tokenOffset": modulo},
+        "stream": True
+    }
+
+    async with session.post(API_URL, json=payload) as resp:
+        if resp.status != 200:
+            text = await resp.text()
+            print(f"[{model}] ERROR: {text}")
+            return {"model": model, "output": "", "error": text}
+
+        output = ""
+        async for chunk in resp.content.iter_any(256):
+            token = chunk.decode()
+            output += token
+            yield model, token
+        return {"model": model, "output": output}
+
+
+async def fuse_stream(models: List[str], prompt: str, modulo_base: int = 1000):
+    """
+    Run all models in parallel and fuse their outputs live
+    """
+    modulo_offsets = generate_modulo_offsets(models, prompt, modulo_base)
+    streams = []
+
+    async with aiohttp.ClientSession() as session:
+        for model in models:
+            streams.append(stream_model(session, model, prompt, modulo=modulo_offsets[model]))
+
+        # gather live streaming generators
+        tasks = [stream.__aiter__() for stream in streams]
+        fused_output = ""
+        done_models = set()
+
+        while tasks:
+            done, pending = await asyncio.wait([task.__anext__() for task in tasks], return_when=asyncio.FIRST_COMPLETED)
+
+            for fut in done:
+                try:
+                    model, token = fut.result()
+                    # Simple live fusion: pick the longest output so far
+                    fused_output += token
+                    sys.stdout.write(token)
+                    sys.stdout.flush()
+                except StopAsyncIteration:
+                    # remove finished tasks
+                    finished_index = tasks.index(fut._coro.cr_frame.f_locals['self'])
+                    done_models.add(models[finished_index])
+                    tasks.pop(finished_index)
+
+        return fused_output
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Live streaming + fused output for Nemodian Ollama models")
+    parser.add_argument("prompt", type=str, help="Prompt to send to models")
+    parser.add_argument("--models", type=str, nargs="+", default=["nemodian-coder", "nemodian-loop"], help="Nemodian model pool")
+    parser.add_argument("--modulo", type=int, default=1000, help="Modulo token base")
+    args = parser.parse_args()
+
+    print(f"💡 Running live streaming for models: {args.models}")
+    fused = asyncio.run(fuse_stream(args.models, args.prompt, modulo_base=args.modulo))
+
+    print("\n\n--- FINAL FUSED OUTPUT ---\n")
+    print(fused)

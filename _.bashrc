@@ -266,3 +266,4 @@ fi
 # ===============================================
 
 export PATH="$PATH:/home/loop/_"
+alias webdev='ai run-webdev'
