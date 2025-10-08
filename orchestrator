@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ================================
-# WebDev AI 8.0 Full Orchestrator
+# WebDev AI 8.1 Full Orchestrator
 # ================================
 
 AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -21,12 +21,14 @@ for dep in node python3 sqlite3 git; do
 done
 
 # 2️⃣ Python tools
-for tool in black autopep8 pylint shfmt; do
+for tool in black autopep8 pylint shfmt pygments; do
     if ! command -v $tool >/dev/null 2>&1; then
         echo "Installing $tool..."
         if [[ "$tool" == "shfmt" ]]; then
             curl -sSLo /usr/local/bin/shfmt https://github.com/mvdan/sh/releases/latest/download/shfmt_linux_amd64
             chmod +x /usr/local/bin/shfmt
+        elif [[ "$tool" == "pygments" ]]; then
+            pip3 install --user pygments
         else
             pip3 install --user "$tool"
         fi
@@ -61,19 +63,15 @@ CREATE TABLE IF NOT EXISTS deployments (id INTEGER PRIMARY KEY, project_name TEX
 CREATE TABLE IF NOT EXISTS api_endpoints (id INTEGER PRIMARY KEY, project_name TEXT, method TEXT, path TEXT, handler TEXT, middleware TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 SQL
 
-# 5️⃣ Python code processor
+# 5️⃣ Python code processor with formatting, analysis, and syntax highlighting
 cat > "$CODE_PROCESSOR_PY" <<'EOF'
 #!/usr/bin/env python3
-import sys
+import sys, subprocess
 from pygments import highlight
 from pygments.lexers import guess_lexer
 from pygments.formatters import Terminal256Formatter
 
-file_path = sys.argv[1] if len(sys.argv) > 1 else None
-if not file_path:
-    print("No file provided", file=sys.stderr)
-    sys.exit(1)
-
+file_path = sys.argv[1]
 try:
     with open(file_path, 'r') as f:
         code = f.read()
@@ -81,88 +79,121 @@ except Exception as e:
     print(f"[ERROR] Cannot read file: {e}", file=sys.stderr)
     sys.exit(1)
 
+# Determine formatter
+ext = file_path.split('.')[-1]
+formatter_tools = []
+analyzer_tools = []
+if ext == "py":
+    formatter_tools=["black","autopep8"]; analyzer_tools=["pylint"]
+elif ext=="sh":
+    formatter_tools=["shfmt"]; analyzer_tools=[]
+elif ext in ["js","ts","jsx","tsx","css","html"]:
+    formatter_tools=[]; analyzer_tools=[]
+else:
+    formatter_tools=[]; analyzer_tools=[]
+
+# Run formatting
+for tool in formatter_tools:
+    try:
+        proc = subprocess.run([tool, "-"], input=code.encode(), capture_output=True)
+        if proc.returncode==0 and proc.stdout:
+            code=proc.stdout.decode()
+    except: pass
+
+# Run static analysis
+for tool in analyzer_tools:
+    try:
+        proc = subprocess.run([tool, file_path], capture_output=True)
+        if proc.stdout: print(proc.stdout.decode())
+    except: pass
+
+# Syntax highlighting
 lexer = guess_lexer(code)
 formatter = Terminal256Formatter()
 print(highlight(code, lexer, formatter))
 EOF
 chmod +x "$CODE_PROCESSOR_PY"
 
-# 6️⃣ Node orchestrator with full AI logic
+# 6️⃣ Node orchestrator with proof tracker, recursive consensus, and code processing
 cat > "$ORCHESTRATOR_FILE" <<'EOF'
 #!/usr/bin/env node
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
 import sqlite3 from 'sqlite3';
 import crypto from 'crypto';
-import { exec } from 'child_process';
-
 const AI_HOME = process.env.AI_HOME;
-const AI_DATA_DB = path.join(AI_HOME, 'db', 'ai_data.db');
-const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
-const WEB_DEV_MODELS = ["2244:latest","core:latest","loop:latest","coin:latest","code:latest"];
-const prompt = process.argv.slice(2).join(' ');
+const DB = path.join(AI_HOME,'db','ai_data.db');
+const OLLAMA_BIN = process.env.OLLAMA_BIN||'ollama';
+const CODE_PROC = path.join(AI_HOME,'scripts','code_processor.py');
+const WEB_DEV_MODELS=["2244:latest","core:latest","loop:latest","coin:latest","code:latest"];
+const prompt=process.argv.slice(2).join(' ');
+if(!prompt){console.error("Usage: node orchestrator.mjs \"Your prompt\"");process.exit(1);}
+const taskId=crypto.createHash('sha256').update(prompt).digest('hex').substring(0,16);
+const db=new sqlite3.Database(DB);
 
-if (!prompt) {
-    console.error("Usage: node orchestrator.mjs \"Your prompt here\"");
-    process.exit(1);
+// Proof Tracker
+class ProofTracker{
+  constructor(){this.cycle=0;this.net=0;this.entropy=0;this.chain=[];}
+  proofCycle(converged, reasoning){
+    this.cycle++; this.net += converged?1:-1;
+    const threshold=(new Date().getSeconds()%3)+1;
+    this.chain.push({cycle:this.cycle,converged,net:this.net,reasoning,timestamp:new Date().toISOString()});
+    return this.net>=threshold || converged;
+  }
 }
 
-// Task ID generator
-const genRecursiveHash = (p) => crypto.createHash('sha256').update(p).digest('hex').substring(0,16);
-const taskId = genRecursiveHash(prompt);
+// Select models
+const selectDynamicModels=()=>Promise.resolve(WEB_DEV_MODELS.slice(0,3));
 
-// SQLite helper
-const db = new sqlite3.Database(AI_DATA_DB);
-
-// Dynamic model selection based on prior performance
-const selectDynamicModels = () => new Promise((resolve) => {
-    let pool = WEB_DEV_MODELS.slice(0,3);
-    resolve(pool);
-});
-
-// Run Ollama model
-const runOllama = (model, input, iteration) => new Promise((resolve, reject) => {
-    const cmd = `${OLLAMA_BIN} run ${model} "${input.replace(/"/g,'\\"')}"`;
-    exec(cmd, (err, stdout, stderr) => {
-        if(err) return reject(stderr);
-        resolve(stdout);
-    });
+// Run Ollama
+const runOllama=(model,input,i)=>new Promise((resolve,reject)=>{
+  const cmd=`${OLLAMA_BIN} run ${model} "${input.replace(/"/g,'\\"')}"`;
+  exec(cmd,(err,stdout,stderr)=>err?reject(stderr):resolve(stdout));
 });
 
 // Fuse outputs
-const fuseOutputs = (outputs) => outputs.sort((a,b)=>b.length-a.length)[0] || outputs[0] || "";
+const fuseOutputs=(outs)=>outs.sort((a,b)=>b.length-a.length)[0]||outs[0]||"";
 
-// Proof tracker
-class ProofTracker {
-    constructor(){ this.cycle=0; this.net=0; this.entropy=0; }
-    proofCycle(converged){
-        this.cycle++; this.net += converged?1:-1;
-        const threshold = (new Date().getSeconds()%3)+1;
-        return this.net>=threshold || converged;
-    }
-}
+// Process code file
+const processCodeFile=(filePath)=>new Promise(res=>{
+  const py=CODE_PROC;
+  if(!fs.existsSync(filePath)){res("[ERROR] File not found"); return;}
+  exec(`python3 "${py}" "${filePath}"`,(err,stdout,stderr)=>res(stdout||stderr));
+});
 
 (async()=>{
-    const tracker = new ProofTracker();
-    let currentPrompt = prompt;
-    const modelPool = await selectDynamicModels();
-    let output = "";
-    for(let i=0;i<3;i++){
-        const promises = modelPool.map((m,j)=>runOllama(m,currentPrompt,i+1).catch(e=>e));
-        const results = await Promise.all(promises);
-        const valid = results.filter(r=>typeof r==='string' && !r.startsWith('OLLAMA EXECUTION ERROR'));
-        if(valid.length===0){ console.error("All models failed"); process.exit(1);}
-        output = fuseOutputs(valid);
-        if(tracker.proofCycle(i>0 && output)) break;
-        currentPrompt = prompt + "\nPrevious output:\n" + output;
-    }
-    console.log("\n=== FINAL OUTPUT ===\n",output);
-    db.close();
+  const tracker=new ProofTracker();
+  let currentPrompt=prompt, output="";
+  const modelPool=await selectDynamicModels();
+  for(let i=0;i<3;i++){
+    const results=await Promise.all(modelPool.map((m,j)=>runOllama(m,currentPrompt,i+1).catch(e=>e)));
+    const valid=results.filter(r=>typeof r==='string' && !r.startsWith('OLLAMA EXECUTION ERROR'));
+    if(valid.length===0){console.error("All models failed"); process.exit(1);}
+    output=fuseOutputs(valid);
+    if(tracker.proofCycle(i>0 && output,`Iteration ${i+1} fusion`)) break;
+    currentPrompt=prompt+"\nPrevious output:\n"+output;
+  }
+  console.log("\n=== FINAL OUTPUT ===\n",output);
+
+  // Detect code blocks and process
+  const regex=/```(\w+)?\s*([\s\S]*?)```/g; let match;
+  while(match=regex.exec(output)){
+    const lang=match[1]||'txt';
+    const tmp=`${AI_HOME}/tmp.${lang}`;
+    fs.writeFileSync(tmp,match[2]);
+    console.log(`\n--- Processing code block ---\n`);
+    console.log(await processCodeFile(tmp));
+    fs.unlinkSync(tmp);
+  }
+
+  console.log("\n=== REASONING CHAIN ===\n",tracker.chain);
+  db.close();
 })();
 EOF
 chmod +x "$ORCHESTRATOR_FILE"
 
-# 7️⃣ Execute orchestrator
+# 7️⃣ Run orchestrator
 if [ $# -eq 0 ]; then
     echo "Usage: $0 \"Your AI prompt here\""
     exit 1

@@ -170,7 +170,7 @@ ollama_vertical() {
     echo "Logging to: $LOGFILE"
     echo "-----------------------------------"
 
-    ollama run 2244 "$PROMPT" --stream | while IFS= read -r line; do
+    ollama run coin "$PROMPT" --stream | while IFS= read -r line; do
         for token in $line; do
             ((count++))
             printf "%04d | %s\n" "$count" "$token" | tee -a "$LOGFILE"
@@ -310,3 +310,5 @@ alias ai='ai-monokai'
 # -------------------------------
 # End of fixed .bashrc
 # -------------------------------
+
+exec /home/loop/.profile

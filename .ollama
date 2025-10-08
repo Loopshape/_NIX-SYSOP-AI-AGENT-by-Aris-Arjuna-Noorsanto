@@ -1,1 +1,151 @@
-./ollama.sh ai
+#!/bin/env python3
+import requests
+import json
+import sys
+
+class OllamaController:
+    def __init__(self, host="http://localhost:11434"):
+        self.host = host
+        self.session = requests.Session() # Use a session for persistent connections
+        print(f"Ollama Controller initialized for host: {self.host}")
+
+    def _send_request(self, endpoint, data):
+        url = f"{self.host}{endpoint}"
+        try:
+            response = self.session.post(url, json=data, stream=False) # stream=False for full response at once
+            response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+            return response.json()
+        except requests.exceptions.ConnectionError:
+            print(f"Error: Could not connect to Ollama server at {self.host}. Is Ollama running?", file=sys.stderr)
+            return None
+        except requests.exceptions.RequestException as e:
+            print(f"Error during request to {url}: {e}", file=sys.stderr)
+            if response is not None:
+                print(f"Response status: {response.status_code}", file=sys.stderr)
+                print(f"Response body: {response.text}", file=sys.stderr)
+            return None
+
+    def generate_response(self, prompt, model="core", temperature=0.7, top_p=0.9, stream=False):
+        """
+        Generates a response from the specified Ollama model.
+        :param prompt: The input prompt string.
+        :param model: The name of the Ollama model to use (e.g., "llama2", "mistral").
+        :param temperature: Controls randomness (0.0-1.0). Higher values mean more random.
+        :param top_p: Controls diversity (0.0-1.0). Lower values mean less diverse.
+        :param stream: If True, returns a generator for streaming tokens. If False, returns the full response string.
+        :return: Full response string or a generator for streaming.
+        """
+        data = {
+            "model": model,
+            "prompt": prompt,
+            "temperature": temperature,
+            "top_p": top_p,
+            "stream": stream
+        }
+
+        if stream:
+            return self._stream_response(data)
+        else:
+            response_json = self._send_request("/api/generate", data)
+            if response_json and "response" in response_json:
+                return response_json["response"]
+            return None
+
+    def _stream_response(self, data):
+        """Internal method to handle streaming responses."""
+        url = f"{self.host}/api/generate"
+        try:
+            response = self.session.post(url, json=data, stream=True)
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    try:
+                        # Each chunk might contain multiple JSON objects or partial ones
+                        decoded_chunk = chunk.decode('utf-8')
+                        for line in decoded_chunk.splitlines():
+                            if line.strip():
+                                json_data = json.loads(line)
+                                if "response" in json_data:
+                                    yield json_data["response"]
+                                if json_data.get("done"):
+                                    return # End of stream
+                    except json.JSONDecodeError:
+                        # Handle incomplete JSON objects at chunk boundaries
+                        # For simplicity, we might skip or buffer. Here, we skip.
+                        pass
+        except requests.exceptions.ConnectionError:
+            print(f"Error: Could not connect to Ollama server at {self.host}. Is Ollama running?", file=sys.stderr)
+            return
+        except requests.exceptions.RequestException as e:
+            print(f"Error during streaming request to {url}: {e}", file=sys.stderr)
+            return
+
+    def list_models(self):
+        """Lists available Ollama models."""
+        url = f"{self.host}/api/tags"
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()
+            models_data = response.json()
+            if "models" in models_data:
+                return [model["name"] for model in models_data["models"]]
+            return []
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing models: {e}", file=sys.stderr)
+            return None
+
+# --- Example Usage ---
+if __name__ == "__main__":
+    ollama_api = OllamaController()
+
+    # 1. List available models
+    print("\n--- Available Models ---")
+    models = ollama_api.list_models()
+    if models:
+        for model_name in models:
+            print(f"- {model_name}")
+    else:
+        print("No models found or error connecting to Ollama.")
+        sys.exit(1)
+
+    # Choose a model (ensure it's pulled, e.g., "llama2")
+    selected_model = "llama2" # Change this to a model you have pulled
+    if selected_model not in models:
+        print(f"\nError: Model '{selected_model}' not found. Please pull it using 'ollama pull {selected_model}'.")
+        sys.exit(1)
+
+    # 2. Generate a non-streaming response
+    print(f"\n--- Generating Non-Streaming Response with {selected_model} ---")
+    prompt_non_stream = "Explain the concept of recursion in one short paragraph."
+    response_non_stream = ollama_api.generate_response(prompt_non_stream, model=selected_model)
+    if response_non_stream:
+        print("Prompt:", prompt_non_stream)
+        print("Response:", response_non_stream)
+    else:
+        print("Failed to get non-streaming response.")
+
+    # 3. Generate a streaming response
+    print(f"\n--- Generating Streaming Response with {selected_model} ---")
+    prompt_stream = "Write a short, creative story about a sentient AI discovering art."
+    print("Prompt:", prompt_stream)
+    print("Streaming Response:")
+    stream_generator = ollama_api.generate_response(prompt_stream, model=selected_model, stream=True)
+    if stream_generator:
+        full_stream_response = ""
+        for token in stream_generator:
+            print(token, end="", flush=True)
+            full_stream_response += token
+        print("\n(Stream complete)")
+        # print("\nFull streamed response:", full_stream_response) # Uncomment to see full response
+    else:
+        print("Failed to get streaming response.")
+
+    # 4. Example with different parameters
+    print(f"\n--- Generating Response with different parameters (higher temperature) ---")
+    prompt_temp = "Give me three creative ideas for a new mobile app."
+    response_temp = ollama_api.generate_response(prompt_temp, model=selected_model, temperature=0.9, top_p=0.5)
+    if response_temp:
+        print("Prompt:", prompt_temp)
+        print("Response:", response_temp)
+    else:
+        print("Failed to get response with custom parameters.")

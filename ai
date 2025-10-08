@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+
 # WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
 # Version: 8.3.5 (Dynamic Slower Model Control: Token & History Modulo)
+
+pkill ollama && nohup ollama serve &
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
