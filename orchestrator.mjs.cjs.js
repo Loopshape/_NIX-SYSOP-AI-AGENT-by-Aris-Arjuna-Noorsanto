@@ -17,7 +17,7 @@ const SLOWER_MODELS_ENV = process.env.SLOWER_MODELS || "llama3:70b,mixtral:8x7b"
 // Enhanced Model Pool for Web Development (Default/Fallback)
 const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
 const SLOWER_MODELS = SLOWER_MODELS_ENV.split(',');
-const SLOWER_MODEL_ACTIVATION_CHANCE = 0.3; // 30% chance to engage a slower model for review
+const BASE_SLOWER_MODEL_ACTIVATION_CHANCE = 0.3; // 30% base chance
 
 // Working color implementation using template literals
 const colors = {
@@ -471,11 +471,34 @@ User Task: `;
             // Proof Cycle with Dynamic Math Logic
             converged = this.proofTracker.proofCycle(initialConverged, bestFramework, convergenceReasoning);
             
-            // --- NEW: Slower Model Control Step ---
-            const randomChance = getDeterministicRandomInt(this.taskId + String(i), 0, 100);
-            if (SLOWER_MODELS.length > 0 && randomChance < (SLOWER_MODEL_ACTIVATION_CHANCE * 100)) {
-                think(`Deterministic random chance (${randomChance}%) triggered slower model review.`, 2);
-                const slowerModelIndex = getDeterministicRandomInt(this.taskId + String(i) + "slower", 0, SLOWER_MODELS.length - 1);
+            // --- NEW: Dynamic Slower Model Control Step ---
+            const currentProofState = this.proofTracker.getState();
+            let dynamicChanceMultiplier = 1.0;
+
+            // Influence by history (net worth) - if netWorthIndex is negative, increase chance.
+            // Clamp between -3 and 3 for reasonable influence
+            const netWorthInfluence = Math.max(-3, Math.min(3, currentProofState.netWorthIndex)); 
+            dynamicChanceMultiplier += (netWorthInfluence * -0.15); // -0.45 to +0.45 adjustment
+
+            // Influence by output length (token modulo) - longer output, slightly higher chance of review
+            const outputLength = fusedOutput.length;
+            dynamicChanceMultiplier += Math.min(0.3, outputLength / 3000); // Max 30% increase for very long outputs (e.g., 3000 chars)
+
+            // Influence by cycle (history modulo) - increase chance with more cycles
+            dynamicChanceMultiplier += (currentProofState.cycleIndex * 0.1); // 10% increase per cycle
+
+            // Clamp multiplier to a reasonable range, e.g., 0.1 to 2.5
+            dynamicChanceMultiplier = Math.max(0.1, Math.min(2.5, dynamicChanceMultiplier));
+
+            const effectiveSlowerModelChance = BASE_SLOWER_MODEL_ACTIVATION_CHANCE * dynamicChanceMultiplier;
+            const randomChance = getDeterministicRandomInt(this.taskId + String(i) + fusedOutput.length + currentProofState.netWorthIndex, 0, 100);
+
+            if (SLOWER_MODELS.length > 0 && randomChance < (effectiveSlowerModelChance * 100)) {
+                think(`Dynamic slower model chance (${effectiveSlowerModelChance.toFixed(2)}% based on history/token) triggered review (random: ${randomChance}%).`, 2);
+                
+                // Select slower model deterministically based on current state
+                const slowerModelSeed = this.taskId + String(i) + fusedOutput.length + currentProofState.netWorthIndex + currentProofState.entropyRatio;
+                const slowerModelIndex = getDeterministicRandomInt(slowerModelSeed, 0, SLOWER_MODELS.length - 1);
                 const selectedSlowerModel = SLOWER_MODELS[slowerModelIndex];
                 
                 const reviewPrompt = `Review and refine the following output based on the original task: "${this.initialPrompt}". Focus on accuracy, completeness, and best practices. Return ONLY the refined output.
@@ -498,12 +521,12 @@ Your refined output:`;
                 lastFusedOutput = refinedOutput; // Update lastFusedOutput with refined version
             } else {
                 if (SLOWER_MODELS.length > 0) {
-                    think(`Slower model review skipped this iteration (chance: ${randomChance}%).`, 2);
+                    think(`Slower model review skipped this iteration (dynamic chance: ${effectiveSlowerModelChance.toFixed(2)}%, random: ${randomChance}%).`, 2);
                 }
                 currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
                 lastFusedOutput = fusedOutput;
             }
-            // --- END Slower Model Control Step ---
+            // --- END Dynamic Slower Model Control Step ---
 
             if (converged) {
                 think("Consensus achieved! Dynamic threshold met or outputs converged.", 2);
@@ -631,10 +654,13 @@ Your refined output:`;
         think("Starting WebDev AI execution...", 0);
         
         // 1. Read file content if --file option is present
-        if (this.options.file) {
-            const fileContent = await this.readProjectFile(this.options.file);
-            this.initialPrompt = fileContent + this.initialPrompt;
-            showReasoning(`Injected file content from: ${this.options.file}`, 'File Context');
+        if (this.options.file && this.options.file.length > 0) { // Handle multiple files
+            let fileContents = "";
+            for (const filePath of this.options.file) {
+                fileContents += await this.readProjectFile(filePath);
+            }
+            this.initialPrompt = fileContents + this.initialPrompt;
+            showReasoning(`Injected file content from: ${this.options.file.join(', ')}`, 'File Context');
         }
 
         console.log(colors.boldCyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
@@ -669,10 +695,11 @@ Your refined output:`;
             const key = parts; // FIX: key is the first part
             const value = parts.length > 1 ? parts.slice(1).join('=') : true;
             
-            // Special handling for --file
-            if (key === 'file' && typeof value === 'boolean') { // If --file is passed without =, expect path as next arg
-                options[key] = args[i + 1];
-                i++; // Skip next argument
+            // Special handling for --file (can be multiple)
+            if (key === 'file') {
+                if (!options[key]) options[key] = [];
+                options[key].push(value === true ? args[i + 1] : value); // If no '=', next arg is value
+                if (value === true) i++; // Skip next argument if it was the value
             } else {
                 options[key] = value;
             }

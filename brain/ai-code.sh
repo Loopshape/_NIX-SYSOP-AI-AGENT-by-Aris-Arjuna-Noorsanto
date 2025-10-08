@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+# ███████╗██╗   ██╗███████╗ ██████╗ ██████╗ █████╗ ██╗    ██████╗ ██████╗ ██████╗ ███████╗
+# ██╔════╝╚██╗ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║    ██╔══██╗██╔══██╗██╔══██╗██╔════╝
+# ███████╗ ╚████╔╝ █████╗  ██║   ██║██████╔╝███████║██║    ██║  ██║██████╔╝██████╔╝█████╗  
+# ╚════██║  ╚██╔╝  ██╔══╝  ██║   ██║██╔═══╝ ██╔══██║██║    ██║  ██║██╔═══╝ ██╔═══╝ ██╔══╝  
+# ███████║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██████╔╝██║     ██║     ███████╗
+# ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝     ╚══════╝
+#
 # WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
-# Version: 8.3.4 (Regex File Access for Repair & Context)
+# Version: 8.1.0 (Consolidated Features & Bug Fixes)
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -51,7 +60,7 @@ enhanced_status() {
     
     # Check if dependencies are available
     printf "\n${COLOR_BRIGHT}${COLOR_BLUE}🔧 DEPENDENCIES:${COLOR_RESET}\n"
-    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN" "pylint" "black" "autopep8" "shfmt" "ping" "curl")
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN" "pylint" "black" "autopep8" "shfmt")
     for dep in "${deps[@]}"; do
         if command -v "$dep" &> /dev/null; then
             printf "  ${COLOR_GREEN}✅ %s${COLOR_RESET}\n" "$dep"
@@ -136,7 +145,7 @@ show_reasoning() {
     if [ "$SHOW_REASONING" = "true" ] && [ -n "$reasoning" ]; then
         echo -e "\n${COLOR_YELLOW}💭 REASONING [$context]:${COLOR_RESET}"
         echo -e "${COLOR_GRAY}$reasoning${COLOR_RESET}"
-        echo -e "${COLOR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        echo -e "${COLOR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
     fi
 }
 
@@ -242,7 +251,7 @@ check_dependencies() {
     thinking "Checking and installing system and Python dependencies..." 1
     
     # Check and install core system dependencies
-    local system_deps=("sqlite3" "node" "python3" "git" "ping" "curl")
+    local system_deps=("sqlite3" "node" "python3" "git")
     for dep in "${system_deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             log_event "ERROR" "Missing critical system dependency: $dep"
@@ -409,7 +418,7 @@ record_hash() {
     local type="$1" target="$2" hash="$3"
     log_event "DEBUG" "Recording hash: $type:$target -> $hash"
 
-    if sqlite3 "$WEB_CONFIG_DB" "INSERT OR REPLACE INTO hashes (type, target, hash) VALUES ('$(sqlite_escape "$type")', '$(sqlite_escape "$target")', '$(sqlite_escape "$hash")');" 2>/dev/null; then
+    if sqlite3 "$WEB_CONFIG_DB" "INSERT OR REPLACE INTO hashes (type, target, hash) VALUES ('$(sqlite_escape "$type")', '$(sqlite_escape "$target")', '$hash');" 2>/dev/null; then
         log_event "INFO" "Recorded hash for $type: $target"
     else
         log_event "WARN" "Failed to record hash for $type: $target"
@@ -448,12 +457,10 @@ const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 const AI_DATA_DB = process.env.AI_DATA_DB;
-const SLOWER_MODELS_ENV = process.env.SLOWER_MODELS || "llama3:70b,mixtral:8x7b"; // Default slower models
 
 // Enhanced Model Pool for Web Development (Default/Fallback)
 const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
-const SLOWER_MODELS = SLOWER_MODELS_ENV.split(',');
-const SLOWER_MODEL_ACTIVATION_CHANCE = 0.3; // 30% chance to engage a slower model for review
+const MODEL_WEIGHTS = { "2244:latest": 2, "core:latest": 2, "loop:latest": 1, "coin:latest": 1, "code:latest": 2 };
 
 // Working color implementation using template literals
 const colors = {
@@ -534,54 +541,6 @@ const genRecursiveHash = (prompt) => {
 
     return `${hash1}.${hash2}.${hash3}.${hash4}.${hash5}.${circularIndex}`;
 };
-
-// --- NEW: Deterministic Random Integer from Hash ---
-const getDeterministicRandomInt = (seedString, min, max) => {
-    const hash = crypto.createHash('sha256').update(seedString).digest('hex');
-    // Take a portion of the hash and convert to integer
-    const intValue = parseInt(hash.substring(0, 8), 16); 
-    return min + (intValue % (max - min + 1));
-};
-
-// --- NEW: Get Google Ping Entropy ---
-const getGooglePingEntropy = async () => {
-    try {
-        think("Pinging google.com for external entropy...", 2);
-        // Use 'ping -c 1' for a single packet on Linux/macOS, '-n 1' on Windows
-        const command = process.platform === 'win32' ? 'ping -n 1 google.com' : 'ping -c 1 google.com';
-        const { stdout } = await new Promise((resolve, reject) => {
-            exec(command, (error, stdout, stderr) => {
-                if (error) {
-                    // Log error but don't reject, return 0 for graceful fallback
-                    console.error(colors.redText(`[PING ERROR] Failed to ping google.com: ${error.message}`));
-                    return resolve({ stdout: '', stderr: error.message });
-                }
-                resolve({ stdout, stderr });
-            });
-        });
-
-        // Extract average RTT (example for Linux/macOS, might need adjustment for Windows)
-        let rttMatch;
-        if (process.platform === 'win32') {
-            rttMatch = stdout.match(/Average = (\d+)ms/);
-        } else {
-            rttMatch = stdout.match(/rtt min\/avg\/max\/mdev = [0-9.]+\/([0-9.]+)/);
-        }
-        
-        if (rttMatch && rttMatch[1]) {
-            const avgRtt = parseFloat(rttMatch[1]);
-            think(`Google Ping RTT: ${avgRtt}ms`, 2);
-            return avgRtt;
-        } else {
-            think("Could not parse ping RTT from output.", 2);
-            return 0; // Default to 0 if parsing fails
-        }
-    } catch (e) {
-        console.error(colors.redText(`[PING EXCEPTION] ${e.message}`));
-        return 0; // Default to 0 on error
-    }
-};
-
 
 // --- Dynamic Model Selection (Ported to Node.js) ---
 const selectDynamicModels = (framework, complexity) => {
@@ -695,16 +654,12 @@ class WebDevProofTracker {
         return Math.min(score, 10);
     }
 
-    async crosslineEntropy(data) { // Made async
-        think("Analyzing output entropy and incorporating external factors...", 1);
+    crosslineEntropy(data) {
+        think("Analyzing output entropy...", 1);
         const hash = crypto.createHash('sha256').update(data).digest('hex');
         this.entropyRatio += parseInt(hash.substring(0, 8), 16);
         
-        // Incorporate Google Ping RTT for external entropy
-        const pingRtt = await getGooglePingEntropy();
-        this.entropyRatio += pingRtt; // Add RTT to entropy ratio
-
-        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}..., ping: ${pingRtt}ms)`, 'Entropy Analysis');
+        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}...)`, 'Entropy Analysis');
     }
 
     proofCycle(converged, frameworkUsed = '', reasoning = '') {
@@ -898,7 +853,7 @@ User Task: `;
             }
 
             think(`Fusing ${validResults.length} valid outputs...`, 2);
-            await this.proofTracker.crosslineEntropy(validResults.join('')); // AWAIT here
+            this.proofTracker.crosslineEntropy(validResults.join(''));
             const fusedOutput = this.fuseWebOutputs(validResults);
             
             const convergenceReasoning = `Iteration ${i + 1}: ${fusedOutput === lastFusedOutput ? 'Outputs converged' : 'Outputs still diverging'}`;
@@ -907,45 +862,14 @@ User Task: `;
             // Proof Cycle with Dynamic Math Logic
             converged = this.proofTracker.proofCycle(initialConverged, bestFramework, convergenceReasoning);
             
-            // --- NEW: Slower Model Control Step ---
-            const randomChance = getDeterministicRandomInt(this.taskId + String(i), 0, 100);
-            if (SLOWER_MODELS.length > 0 && randomChance < (SLOWER_MODEL_ACTIVATION_CHANCE * 100)) {
-                think(`Deterministic random chance (${randomChance}%) triggered slower model review.`, 2);
-                const slowerModelIndex = getDeterministicRandomInt(this.taskId + String(i) + "slower", 0, SLOWER_MODELS.length - 1);
-                const selectedSlowerModel = SLOWER_MODELS[slowerModelIndex];
-                
-                const reviewPrompt = `Review and refine the following output based on the original task: "${this.initialPrompt}". Focus on accuracy, completeness, and best practices. Return ONLY the refined output.
-
-Output to review:
-\`\`\`
-${fusedOutput}
-\`\`\`
-
-Your refined output:`;
-                
-                think(`Engaging slower model (${selectedSlowerModel}) for review...`, 2);
-                const refinedOutput = await this.runOllama(selectedSlowerModel, reviewPrompt, bestFramework, i + 1 + "_review").catch(e => {
-                    console.error(colors.redText(`[SLOWER MODEL ERROR] ${e}`));
-                    return fusedOutput; // Fallback to original if slower model fails
-                });
-                
-                showReasoning(`Slower model (${selectedSlowerModel}) refined output.`, 'Slower Model Control');
-                currentPrompt = this.initialPrompt + `\n\nPrevious iteration (refined) output for improvement:\n${refinedOutput}`;
-                lastFusedOutput = refinedOutput; // Update lastFusedOutput with refined version
-            } else {
-                if (SLOWER_MODELS.length > 0) {
-                    think(`Slower model review skipped this iteration (chance: ${randomChance}%).`, 2);
-                }
-                currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
-                lastFusedOutput = fusedOutput;
-            }
-            // --- END Slower Model Control Step ---
-
             if (converged) {
                 think("Consensus achieved! Dynamic threshold met or outputs converged.", 2);
             } else {
                 think("No consensus yet, continuing to next iteration...", 2);
             }
+
+            lastFusedOutput = fusedOutput;
+            currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
         }
 
         think("Consensus process completed", 1);
@@ -1067,13 +991,10 @@ Your refined output:`;
         think("Starting WebDev AI execution...", 0);
         
         // 1. Read file content if --file option is present
-        if (this.options.file && this.options.file.length > 0) { // Handle multiple files
-            let fileContents = "";
-            for (const filePath of this.options.file) {
-                fileContents += await this.readProjectFile(filePath);
-            }
-            this.initialPrompt = fileContents + this.initialPrompt;
-            showReasoning(`Injected file content from: ${this.options.file.join(', ')}`, 'File Context');
+        if (this.options.file) {
+            const fileContent = await this.readProjectFile(this.options.file);
+            this.initialPrompt = fileContent + this.initialPrompt;
+            showReasoning(`Injected file content from: ${this.options.file}`, 'File Context');
         }
 
         console.log(colors.boldCyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
@@ -1108,11 +1029,10 @@ Your refined output:`;
             const key = parts; // FIX: key is the first part
             const value = parts.length > 1 ? parts.slice(1).join('=') : true;
             
-            // Special handling for --file (can be multiple)
-            if (key === 'file') {
-                if (!options[key]) options[key] = [];
-                options[key].push(value === true ? args[i + 1] : value); // If no '=', next arg is value
-                if (value === true) i++; // Skip next argument if it was the value
+            // Special handling for --file
+            if (key === 'file' && typeof value === 'boolean') { // If --file is passed without =, expect path as next arg
+                options[key] = args[i + 1];
+                i++; // Skip next argument
             } else {
                 options[key] = value;
             }
@@ -1275,73 +1195,52 @@ EOF_PY
 
 # --- NEW CODE REPAIR TOOL ---
 tool_code_repair() {
-    local file_pattern="$1" # Now accepts a pattern
-    local base_dir="${PROJECTS_DIR}/$(cat "$SESSION_FILE" 2>/dev/null || echo ".")" # Use current project dir if session active
-    base_dir="${base_dir%/.}"; # Remove trailing /. if present
-
-    log_event "ANALYSIS" "Starting Code Repair Agent for pattern: '$file_pattern' in '$base_dir'"
+    local file_path="$1"
+    local file_extension="${file_path##*.}"
     
-    local matched_files=()
-    # Use find_files_by_regex to get a list of files
-    IFS=$'\n' read -r -d '' -a matched_files < <(find_files_by_regex "$base_dir" "$file_pattern" 10 && printf '\0')
-
-    if [ ${#matched_files[@]} -eq 0 ]; then
-        log_event "ERROR" "No files found matching pattern: '$file_pattern' in '$base_dir'"
-        echo "${COLOR_RED}ERROR: No files found matching pattern: '$file_pattern' in '$base_dir'${COLOR_RESET}"
+    log_event "ANALYSIS" "Starting Code Repair Agent on: $file_path"
+    
+    if [[ ! -f "$file_path" ]]; then
+        log_event "ERROR" "File not found for repair: $file_path"
         return 1
     fi
 
-    log_event "INFO" "Found ${#matched_files[@]} files for repair: ${matched_files[*]}"
-    echo "${COLOR_YELLOW}Found ${#matched_files[@]} files for repair:${COLOR_RESET}"
-    for f in "${matched_files[@]}"; do
-        echo "  - $f"
-    done
-
-    if ! confirm_action "Proceed with AI-powered repair for these ${#matched_files[@]} files?"; then
-        log_event "WARN" "AI repair cancelled by user."
-        echo "${COLOR_YELLOW}AI repair cancelled.${COLOR_RESET}"
-        return 1
-    fi
-
-    for file_path in "${matched_files[@]}"; do
-        local file_extension="${file_path##*.}"
-        log_event "ANALYSIS" "Processing file for repair: $file_path"
-
-        # 1. Run Static Analysis and Formatting
-        thinking "Running static analysis and formatting pipeline for $file_path..."
-        local analysis_output
-        
-        local temp_report_file
-        temp_report_file=$(mktemp)
-        
-        if ! python3 "$CODE_PROCESSOR_PY" "$file_path" "$file_extension" > "$temp_report_file" 2>&1; then
-            log_event "ERROR" "Python code processor failed for $file_path. Check dependencies."
-            cat "$temp_report_file" >&2
-            rm "$temp_report_file"
-            continue # Continue to next file
-        fi
-
-        analysis_output=$(cat "$temp_report_file")
+    # 1. Run Static Analysis and Formatting
+    thinking "Running static analysis and formatting pipeline..."
+    local analysis_output
+    
+    local temp_report_file
+    temp_report_file=$(mktemp)
+    
+    if ! python3 "$CODE_PROCESSOR_PY" "$file_path" "$file_extension" > "$temp_report_file" 2>&1; then
+        log_event "ERROR" "Python code processor failed. Check dependencies."
+        cat "$temp_report_file" >&2
         rm "$temp_report_file"
+        return 1
+    fi
 
-        local formatted_code
-        local analysis_findings
-        
-        formatted_code=$(echo "$analysis_output" | sed -n '/--- SYNTAX HIGHLIGHTED CODE ---/,$p' | sed '1,2d' | sed '$d' | sed '/^$/d' || true)
-        analysis_findings=$(echo "$analysis_output" | sed -n '/--- STATIC ANALYSIS FINDINGS ---/,/--- SYNTAX HIGHLIGHTED CODE ---/p' | sed '1d;$d' || true)
+    analysis_output=$(cat "$temp_report_file")
+    rm "$temp_report_file"
 
-        if [[ -z "$analysis_findings" ]]; then
-            log_event "SUCCESS" "File $file_path is clean! Only formatting applied."
-            if confirm_action "Apply formatting changes to $file_path?"; then
-                echo "$formatted_code" > "$file_path"
-                log_event "SUCCESS" "File $file_path formatted successfully."
-            fi
-            continue # Continue to next file
+    local formatted_code
+    local analysis_findings
+    
+    # Extract the formatted code and the analysis findings
+    formatted_code=$(echo "$analysis_output" | sed -n '/--- SYNTAX HIGHLIGHTED CODE ---/,$p' | sed '1,2d' | sed '$d' | sed '/^$/d' || true)
+    analysis_findings=$(echo "$analysis_output" | sed -n '/--- STATIC ANALYSIS FINDINGS ---/,/--- SYNTAX HIGHLIGHTED CODE ---/p' | sed '1d;$d' || true)
+
+    if [[ -z "$analysis_findings" ]]; then
+        log_event "SUCCESS" "Code is clean! Only formatting applied."
+        if confirm_action "Apply formatting changes to $file_path"; then
+            echo "$formatted_code" > "$file_path"
+            log_event "SUCCESS" "File $file_path formatted successfully."
         fi
+        return 0
+    fi
 
-        # 2. Construct AI Repair Prompt
-        log_event "WARN" "Analysis found issues in $file_path. Delegating to Ollama for intelligent repair."
-        local repair_prompt="The following code has been formatted and analyzed by static tools. Your task is to intelligently fix the issues and return ONLY the corrected code block.
+    # 2. Construct AI Repair Prompt
+    log_event "WARN" "Analysis found issues. Delegating to Ollama for intelligent repair."
+    local repair_prompt="The following code has been formatted and analyzed by static tools. Your task is to intelligently fix the issues and return ONLY the corrected code block. DO NOT include any explanation or extra text.
 
 File: $file_path
 Language: $file_extension
@@ -1357,39 +1256,36 @@ $formatted_code
 
 Your corrected code (start with \`\`\`$file_extension):"
 
-        # 3. Call Ollama directly for Repair
-        log_event "EXECUTE" "Calling Ollama for intelligent code repair for $file_path..."
-        local repaired_response
-        local code_repair_model=$(get_config code_repair_model || echo "code:latest") 
-        repaired_response=$(ollama run "$code_repair_model" "$repair_prompt" 2>&1 || true)
-        
-        local repaired_code
-        repaired_code=$(echo "$repaired_response" | sed -n '/```/,$p' | sed '1d;$d' | sed '/^$/d' || true)
+    # 3. Call Ollama directly for Repair
+    log_event "EXECUTE" "Calling Ollama for intelligent code repair..."
+    local repaired_response
+    # Using a default code model, can be made configurable
+    local code_repair_model=$(get_config code_repair_model || echo "code:latest") 
+    repaired_response=$(ollama run "$code_repair_model" "$repair_prompt" 2>&1 || true)
+    
+    local repaired_code
+    repaired_code=$(echo "$repaired_response" | sed -n '/```/,$p' | sed '1d;$d' | sed '/^$/d' || true)
 
-        if [[ -z "$repaired_code" ]]; then
-            log_event "ERROR" "AI failed to return a valid code block for repair for $file_path."
-            echo "${COLOR_RED}ERROR: AI failed to return a valid code block for repair for $file_path.${COLOR_RESET}" >&2
-            echo "AI Response: $repaired_response" >&2
-            continue # Continue to next file
-        fi
+    if [[ -z "$repaired_code" ]]; then
+        log_event "ERROR" "AI failed to return a valid code block for repair."
+        echo "AI Response: $repaired_response" >&2
+        return 1
+    fi
 
-        # 4. Apply Final Repair
-        log_event "ANALYSIS" "AI Repair complete for $file_path. Reviewing final code."
-        echo -e "${COLOR_GREEN}--- AI REPAIRED CODE (Review for $file_path) ---${COLOR_RESET}" >&2
-        echo "$repaired_code" > "$file_path.repaired.tmp"
-        _process_code_file "$file_path.repaired.tmp" "$file_extension" # Re-run processor for final highlight
+    # 4. Apply Final Repair
+    log_event "ANALYSIS" "AI Repair complete. Reviewing final code."
+    echo -e "${COLOR_GREEN}--- AI REPAIRED CODE (Review) ---${COLOR_RESET}" >&2
+    echo "$repaired_code" > "$file_path.repaired.tmp"
+    _process_code_file "$file_path.repaired.tmp" "$file_extension" # Re-run processor for final highlight
 
-        if confirm_action "Apply AI-repaired code to $file_path?"; then
-            echo "$repaired_code" > "$file_path"
-            log_event "SUCCESS" "File $file_path repaired and updated successfully."
-        else
-            log_event "WARN" "AI repair cancelled for $file_path. Repaired code saved to $file_path.repaired.tmp"
-            echo "${COLOR_YELLOW}AI repair cancelled for $file_path. Repaired code saved to $file_path.repaired.tmp${COLOR_RESET}"
-        fi
-        
-        rm -f "$file_path.repaired.tmp"
-    done
-    log_event "SUCCESS" "Code repair process completed for all matched files."
+    if confirm_action "Apply AI-repaired code to $file_path"; then
+        echo "$repaired_code" > "$file_path"
+        log_event "SUCCESS" "File $file_path repaired and updated successfully."
+    else
+        log_event "WARN" "AI repair cancelled. Repaired code saved to $file_path.repaired.tmp"
+    fi
+    
+    rm -f "$file_path.repaired.tmp"
     return 0
 }
 
@@ -1416,7 +1312,6 @@ install_webdev_ai() {
     # Set default config values if not present
     local default_configs=(
         "code_repair_model:code:latest"
-        "slower_models:llama3:70b,mixtral:8x7b" # Default slower models
         "temperature:0.7"
         "top_p:0.9"
     )
@@ -1438,96 +1333,36 @@ install_webdev_ai() {
     echo "  webdev-ai repair ./src/broken_script.py"
 }
 
-# --- NEW HELPER: Find files by regex ---
-find_files_by_regex() {
-    local base_dir="$1"
-    local pattern="$2"
-    local max_depth="${3:-10}" # Default max depth to 10 to prevent excessive searching
-    
-    if [[ ! -d "$base_dir" ]]; then
-        log_event "ERROR" "Base directory not found for regex search: $base_dir"
-        return 1
-    fi
-
-    log_event "DEBUG" "Searching for files matching regex '$pattern' in '$base_dir' (max depth $max_depth)"
-    # Use -regextype posix-extended for broader regex support
-    # -maxdepth to prevent searching entire file system
-    # -print0 for null-separated output to handle filenames with spaces/special chars
-    find "$base_dir" -maxdepth "$max_depth" -type f -regextype posix-extended -regex "$pattern" -print0 2>/dev/null || true
-}
-
 # --- AI Task Runner (Fusion of Triumvirate and WebDev-AI) ---
 run_webdev_task() {
-    local full_prompt="$1"
-    shift # Remove the full_prompt from arguments
-    local file_patterns=() # Now an array for multiple patterns
-    local project_name_for_orchestrator=""
-    local orchestrator_args=()
-
-    # Parse remaining arguments for --file and --project (for the orchestrator)
+    local full_prompt=""
+    local file_path=""
+    local args=()
+    
+    # Parse arguments to separate prompt from --file
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --file)
-                if [[ -z "${2:-}" ]]; then log_event "ERROR" "Error: --file requires a path or regex pattern."; return 1; fi
-                file_patterns+=("$2") # Collect all file patterns
+                if [[ -z "${2:-}" ]]; then log_event "ERROR" "Error: --file requires a path."; return 1; fi
+                file_path="$2"
+                args+=("--file=$file_path")
                 shift 2
                 ;;
-            --project)
-                if [[ -z "${2:-}" ]]; then log_event "ERROR" "Error: --project requires a name."; return 1; fi
-                project_name_for_orchestrator="$2"
-                orchestrator_args+=("--project=$project_name_for_orchestrator")
-                shift 2
-                ;;
-            *) # Unknown args, just pass them through if any
-                orchestrator_args+=("$1")
+            *)
+                full_prompt="$full_prompt $1"
                 shift
                 ;;
         esac
     done
     
-    # --- NEW: Resolve file patterns to actual file paths ---
-    local resolved_file_paths=()
-    local base_search_dir="${PROJECTS_DIR}/$(cat "$SESSION_FILE" 2>/dev/null || echo ".")"
-    base_search_dir="${base_search_dir%/.}"; # Remove trailing /. if present
-
-    if [ ${#file_patterns[@]} -gt 0 ]; then
-        log_event "INFO" "Resolving file patterns: ${file_patterns[*]} in $base_search_dir"
-        for pattern in "${file_patterns[@]}"; do
-            local matched_by_pattern=()
-            IFS=$'\n' read -r -d '' -a matched_by_pattern < <(find_files_by_regex "$base_search_dir" "$pattern" 10 && printf '\0')
-            if [ ${#matched_by_pattern[@]} -eq 0 ]; then
-                log_event "WARN" "No files found for pattern: '$pattern' in '$base_search_dir'"
-                echo "${COLOR_YELLOW}WARNING: No files found for pattern: '$pattern' in '$base_search_dir'${COLOR_RESET}"
-            else
-                log_event "DEBUG" "Pattern '$pattern' matched ${#matched_by_pattern[@]} files."
-                resolved_file_paths+=("${matched_by_pattern[@]}")
-            fi
-        done
-    fi
-
-    # Add resolved file paths to orchestrator arguments
-    for f_path in "${resolved_file_paths[@]}"; do
-        orchestrator_args+=("--file=$f_path")
-    done
-    # --- END NEW: Resolve file patterns ---
-
-    # --- NEW: Prompt Length Warning ---
-    local prompt_length=${#full_prompt}
-    local max_prompt_length=1000 # Define a reasonable max length
-    if (( prompt_length > max_prompt_length )); then
-        log_event "WARN" "Prompt is very long (${prompt_length} characters). This may cause AI models to hang or produce poor results. Consider shortening it."
-        echo "${COLOR_YELLOW}⚠️ WARNING: Your prompt is very long (${prompt_length} characters). This may cause AI models to hang or produce poor results. Consider shortening it.${COLOR_RESET}"
-        # Optionally, you could exit here or truncate the prompt, but for now, just warn.
-    fi
-    # --- END NEW: Prompt Length Warning ---
+    full_prompt=$(echo "$full_prompt" | xargs) # Trim leading/trailing spaces
 
     log_event "ANALYSIS" "User request: $full_prompt"
 
-    # If a session was started via --start, ensure the project name is passed to the orchestrator
-    if [ -f "$SESSION_FILE" ] && [[ -z "$project_name_for_orchestrator" ]]; then
-        local session_proj=$(cat "$SESSION_FILE")
-        thinking "Active session detected: $session_proj. Passing to orchestrator."
-        orchestrator_args+=("--project=$session_proj")
+    if [ -f "$SESSION_FILE" ]; then
+        local proj=$(cat "$SESSION_FILE")
+        thinking "Active session detected: $proj"
+        args+=("--project=$proj")
     fi
 
     log_event "EXECUTE" "Delegating to Node.js Orchestrator for parallel execution..."
@@ -1539,11 +1374,10 @@ run_webdev_task() {
     export VERBOSE_THINKING
     export SHOW_REASONING
     export OLLAMA_BIN # Ensure ollama path is passed
-    export SLOWER_MODELS=$(get_config slower_models || echo "llama3:70b,mixtral:8x7b") # Export slower models config
 
     local final_response
     # The Node.js orchestrator handles the full Triumvirate-style loop internally
-    final_response=$(node "$ORCHESTRATOR_FILE" "$full_prompt" "${orchestrator_args[@]}" 2>&1)
+    final_response=$(node "$ORCHESTRATOR_FILE" "$full_prompt" "${args[@]}" 2>&1)
     local exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then
@@ -1578,7 +1412,7 @@ run_webdev_task() {
 # --- MAIN CLI DISPATCHER ---
 main() {
     local start_time=$(date +%s)
-    log_event "DEBUG" "Script started: WebDev Code-Engine v8.3.4"
+    log_event "DEBUG" "Script started: WebDev Code-Engine v8.1.0"
 
     # Initial directory setup (covers essential directories as per new script)
     mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR" "$LOG_DIR"
@@ -1590,131 +1424,102 @@ main() {
     setup_orchestrator
     setup_code_processor
 
-    local command_found=false
-    local prompt_args=()
-    local file_patterns_for_orchestrator=() # Collects all --file patterns
-    local project_name_for_session="" # To capture --start project_name
-
-    # First pass: Parse all flags and special commands
-    local args_copy=("$@") # Create a copy to iterate and shift
-    set -- "${args_copy[@]}" # Reset positional parameters for iteration
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --start)
-                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
-                    project_name_for_session="$2"
-                    shift 2
-                else
-                    read -p "Project/Repo name: " project_name_for_session
-                    shift
-                fi
-                echo "$project_name_for_session" > "$SESSION_FILE"
-                log_event "SESSION" "Started web development session for $project_name_for_session"
-                thinking "Session started for project: $project_name_for_session" 0
-                command_found=true
-                ;;
-            --stop)
-                [ -f "$SESSION_FILE" ] && local proj=$(cat "$SESSION_FILE") && log_event "SESSION" "Stopped session for $proj"
-                rm -f "$SESSION_FILE"
-                thinking "Session stopped" 0
-                command_found=true
-                shift
-                ;;
-            --verbose|--think)
-                export VERBOSE_THINKING="true"
-                export SHOW_REASONING="true"
-                echo "Verbose thinking: ENABLED"
-                command_found=true
-                shift
-                ;;
-            --quiet)
-                export VERBOSE_THINKING="false"
-                export SHOW_REASONING="false"
-                echo "Verbose thinking: DISABLED"
-                command_found=true
-                shift
-                ;;
-            --install|--setup)
-                install_webdev_ai
-                command_found=true
-                shift
-                ;;
-            --config)
-                local config_subcommand="$2"
-                shift 2
-                case "$config_subcommand" in
-                    "set")
-                        if [[ -z "${1:-}" || -z "${2:-}" ]]; then log_event "ERROR" "Usage: webdev-ai --config set <key> <value>"; return 1; fi
-                        set_config "$1" "$2"
-                        shift 2
-                        ;;
-                    "get")
-                        if [[ -z "${1:-}" ]]; then log_event "ERROR" "Usage: webdev-ai --config get <key>"; return 1; fi
-                        get_config "$1"
-                        shift
-                        ;;
-                    "view") view_config; shift ;;
-                    *) log_event "ERROR" "Usage: webdev-ai --config [set|get|view] [key] [value]"; return 1 ;;
-                esac
-                command_found=true
-                ;;
-            --hash)
-                local hash_subcommand="$2"
-                shift 2
-                case "$hash_subcommand" in
-                    "file")
-                        if [[ -z "${1:-}" ]]; then log_event "ERROR" "Usage: webdev-ai --hash file <path>"; return 1; fi
-                        local file_hash=$(hash_file_content "$1")
-                        record_hash "file" "$1" "$file_hash"
-                        shift
-                        ;;
-                    "prompt")
-                        if [[ -z "${1:-}" ]]; then log_event "ERROR" "Usage: webdev-ai --hash prompt \"<text>\""; return 1; fi
-                        local prompt_hash=$(hash_string "$1")
-                        record_hash "prompt" "$1" "$prompt_hash"
-                        shift
-                        ;;
-                    "view") view_hash_index; shift ;;
-                    *) log_event "ERROR" "Usage: webdev-ai --hash [file|prompt|view] [target]"; return 1 ;;
-                esac
-                command_found=true
-                ;;
-            repair)
-                if [[ -z "${2:-}" ]]; then log_event "ERROR" "Usage: webdev-ai repair <file_pattern>"; return 1; fi
-                tool_code_repair "$2" # Pass the pattern directly
-                command_found=true
-                shift 2
-                ;;
-            status)
-                enhanced_status
-                command_found=true
-                shift
-                ;;
-            --file) # This is a context file for the AI, collect its pattern
-                if [[ -z "${2:-}" ]]; then log_event "ERROR" "Error: --file requires a path or regex pattern."; return 1; fi
-                file_patterns_for_orchestrator+=("$2")
-                shift 2
-                ;;
-            --help|-h)
-                show_help
-                command_found=true
-                shift
-                ;;
-            *) # Collect remaining arguments as prompt
-                prompt_args+=("$1")
-                shift
-                ;;
-        esac
-    done
-
-    # If no specific command was found, and there are prompt arguments, run as a task
-    if ! $command_found && [ ${#prompt_args[@]} -gt 0 ]; then
-        local full_prompt=$(echo "${prompt_args[*]}" | xargs)
-        run_webdev_task "$full_prompt" "${file_patterns_for_orchestrator[@]/#/--file=}" # Pass file patterns as --file args
-    elif ! $command_found; then
-        show_help # If no command and no prompt, show help
+    if [ $# -eq 0 ]; then
+        show_help # Show help if no arguments provided
+        exit 0
     fi
+
+    COMMAND="$1"
+    shift
+
+    case "$COMMAND" in
+        --start)
+            local proj="$1"
+            if [[ -z "$proj" ]]; then
+                read -p "Project/Repo name: " proj
+            fi
+            echo "$proj" > "$SESSION_FILE"
+            log_event "SESSION" "Started web development session for $proj"
+            thinking "Session started for project: $proj" 0
+            ;;
+        --stop)
+            [ -f "$SESSION_FILE" ] && proj=$(cat "$SESSION_FILE") && log_event "SESSION" "Stopped session for $proj"
+            rm -f "$SESSION_FILE"
+            thinking "Session stopped" 0
+            ;;
+        --verbose|--think)
+            export VERBOSE_THINKING="true"
+            export SHOW_REASONING="true"
+            echo "Verbose thinking: ENABLED"
+            ;;
+        --quiet)
+            export VERBOSE_THINKING="false"
+            export SHOW_REASONING="false"
+            echo "Verbose thinking: DISABLED"
+            ;;
+        --install|--setup) # Combined install and setup
+            install_webdev_ai
+            ;;
+        --config)
+            case "${1:-}" in
+                "set")
+                    if [[ -z "${2:-}" || -z "${3:-}" ]]; then
+                        log_event "ERROR" "Usage: webdev-ai --config set <key> <value>"
+                        return 1
+                    fi
+                    set_config "$2" "$3"
+                    ;;
+                "get")
+                    if [[ -z "${2:-}" ]]; then
+                        log_event "ERROR" "Usage: webdev-ai --config get <key>"
+                        return 1
+                    fi
+                    get_config "$2"
+                    ;;
+                "view") view_config ;;
+                *) log_event "ERROR" "Usage: webdev-ai --config [set|get|view] [key] [value]" ;;
+            esac
+            ;;
+        --hash)
+            case "${1:-}" in
+                "file")
+                    if [[ -z "${2:-}" ]]; then
+                        log_event "ERROR" "Usage: webdev-ai --hash file <path>"
+                        return 1
+                    fi
+                    local file_hash=$(hash_file_content "$2")
+                    record_hash "file" "$2" "$file_hash"
+                    ;;
+                "prompt")
+                    if [[ -z "${2:-}" ]]; then
+                        log_event "ERROR" "Usage: webdev-ai --hash prompt \"<text>\""
+                        return 1
+                    fi
+                    local prompt_hash=$(hash_string "$2")
+                    record_hash "prompt" "$2" "$prompt_hash"
+                    ;;
+                "view") view_hash_index ;;
+                *) log_event "ERROR" "Usage: webdev-ai --hash [file|prompt|view] [target]" ;;
+            esac
+            ;;
+        repair)
+            if [[ -z "${1:-}" ]]; then
+                log_event "ERROR" "Usage: webdev-ai repair <file_path>"
+                return 1
+            fi
+            tool_code_repair "$1"
+            ;;
+        status)
+            enhanced_status
+            ;;
+        --help|-h)
+            show_help
+            ;;
+        *)
+            # Default to running a webdev task
+            run_webdev_task "$COMMAND" "$@"
+            ;;
+    esac
 
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
@@ -1723,13 +1528,13 @@ main() {
 
 show_help() {
     cat << EOF
-${COLOR_GREEN}WebDev Code-Engine v8.3.4 - Unified Hybrid Agent${COLOR_RESET}
+${COLOR_GREEN}WebDev Code-Engine v8.1.0 - Unified Hybrid Agent${COLOR_RESET}
 
-${COLOR_CYAN}Description:${COLOR_RESET} Advanced AI agent system with hybrid execution (Node.js/Python), dynamic model selection, and comprehensive logging. Now with deterministic randomness, slower AI control for token streams, external "double entropy" from Google ping RTT, and robust CLI argument parsing. Regex file access for repair and context.
+${COLOR_CYAN}Description:${COLOR_RESET} Advanced AI agent system with hybrid execution (Node.js/Python), dynamic model selection, and comprehensive logging.
 
 ${COLOR_CYAN}Usage:${COLOR_RESET}
-  webdev-ai [OPTIONS] "<your prompt>"      - Run AI Task (NOTE: Always quote your prompt!)
-  webdev-ai repair <file_pattern>          - Run static analysis and AI-powered code repair on files matching pattern
+  webdev-ai [OPTIONS] "<your prompt>"      - Run AI Task
+  webdev-ai repair <file_path>             - Run static analysis and AI-powered code repair
   webdev-ai --verbose                      - Enable verbose debugging
   webdev-ai --quiet                        - Disable verbose debugging
   webdev-ai --install                      - Install dependencies and orchestrator
@@ -1737,24 +1542,16 @@ ${COLOR_CYAN}Usage:${COLOR_RESET}
   webdev-ai --config [set|get|view]        - Configuration management
   webdev-ai --hash [file|prompt|view]      - Content hashing utilities
   webdev-ai status                         - View system status
-  webdev-ai --start [project]              - Start a project session (project name is optional)
+  webdev-ai --start [project]              - Start a project session
   webdev-ai --stop                         - Stop the current session
-  webdev-ai --file <file_pattern>          - Provide file(s) matching pattern as context for the AI task
   webdev-ai --help                         - Show this help
-
-${COLOR_CYAN}Configuration Options (via --config set <key> <value>):${COLOR_RESET}
-  code_repair_model: The Ollama model to use for code repair (default: code:latest)
-  slower_models: Comma-separated list of Ollama models for review/control (default: llama3:70b,mixtral:8x7b)
-  temperature: AI model temperature (default: 0.7)
-  top_p: AI model top_p (default: 0.9)
 
 ${COLOR_CYAN}Examples:${COLOR_RESET}
   webdev-ai "Create a Python Flask API with a /status endpoint"
-  webdev-ai repair "src/.*\.py$"
-  webdev-ai --start my-new-app "Create a simple React component for a user profile."
-  webdev-ai --config set slower_models "llama3:70b,gemma:7b"
-  webdev-ai --hash file "./src/main.js"
-  webdev-ai --file "src/components/.*\.jsx$" "Refactor these React components to use hooks."
+  webdev-ai repair ./src/broken_script.py
+  webdev-ai --start my-new-app
+  webdev-ai --config set code_repair_model llama3:8b
+  webdev-ai --hash file ./src/main.js
 
 ${COLOR_CYAN}Log File:${COLOR_RESET} (Events logged to database: $AI_DATA_DB)
 ${COLOR_CYAN}Data Directory:${COLOR_RESET} $AI_HOME

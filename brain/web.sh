@@ -1,4 +1,351 @@
-// Enhanced WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ███████╗██╗   ██╗███████╗ ██████╗ ██████╗ █████╗ ██╗    ██████╗ ██████╗ ██████╗ ███████╗
+# ██╔════╝╚██╗ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║    ██╔══██╗██╔══██╗██╔══██╗██╔════╝
+# ███████╗ ╚████╔╝ █████╗  ██║   ██║██████╔╝███████║██║    ██║  ██║██████╔╝██████╔╝█████╗  
+# ╚════██║  ╚██╔╝  ██╔══╝  ██║   ██║██╔═══╝ ██╔══██║██║    ██║  ██║██╔═══╝ ██╔═══╝ ██╔══╝  
+# ███████║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██████╔╝██║     ██║     ███████╗
+# ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝     ╚══════╝
+#
+# WebDev Code-Engine with Verbose Thinking (Fixed Colors)
+# Version: 5.0.0 (Hybrid Node/Bash with Dynamic Math Logic)
+
+# --- Enhanced Environment & Configuration ---
+export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
+export ENV_HOME="${ENV_HOME:-$HOME/.webdev_ai_env}"
+export NODE_MODULES="$AI_HOME/node_modules"
+export PLUGIN_DIR="$AI_HOME/plugins"
+export LOG_DIR="$AI_HOME/ollama_logs"
+export ORCHESTRATOR_FILE="$AI_HOME/orchestrator.mjs"
+export TASKS_DIR="$AI_HOME/tasks"
+export PROJECTS_DIR="$AI_HOME/projects"
+export DB_DIR="$AI_HOME/db"
+export SSH_DIR="$AI_HOME/ssh"
+export TEMPLATES_DIR="$AI_HOME/templates"
+export SCRIPTS_DIR="$AI_HOME/scripts"
+export AI_DATA_DB="$DB_DIR/ai_data.db"
+export BLOBS_DB="$DB_DIR/blobs.db"
+export WALLET_DB="$DB_DIR/wallet.db"
+export WEB_CONFIG_DB="$DB_DIR/web_config.db"
+export SESSION_FILE="$AI_HOME/.session"
+export OLLAMA_BIN="ollama"
+export NODE_PATH="${NODE_PATH:-}:$NODE_MODULES"
+
+# Verbose thinking configuration
+export VERBOSE_THINKING="${VERBOSE_THINKING:-true}"
+export THINKING_DELAY="${THINKING_DELAY:-0.5}"
+export SHOW_REASONING="${SHOW_REASONING:-true}"
+
+# --- ANSI Colors (Re-defined for Bash functions) ---
+COLOR_RESET='\x1b[0m'
+COLOR_BRIGHT='\x1b[1m'
+COLOR_RED='\x1b[31m'
+COLOR_GREEN='\x1b[32m'
+COLOR_YELLOW='\x1b[33m'
+COLOR_BLUE='\x1b[34m'
+COLOR_MAGENTA='\x1b[35m'
+COLOR_CYAN='\x1b[36m'
+COLOR_GRAY='\x1b[90m'
+
+# --- Enhanced Status Function ---
+enhanced_status() {
+    printf "\n${COLOR_BRIGHT}${COLOR_CYAN}🌐 WEBDEV AI CODE ENGINE STATUS${COLOR_RESET}\n"
+    printf "${COLOR_GRAY}==========================================${COLOR_RESET}\n"
+    printf "AI_HOME: %s\n" "$AI_HOME"
+    printf "Projects: %s created\n" "$(ls -1 "$PROJECTS_DIR" 2>/dev/null | wc -l)"
+    printf "Active Session: %s\n" "$([ -f "$SESSION_FILE" ] && cat "$SESSION_FILE" || echo "None")"
+    printf "Verbose Thinking: %s\n" "$VERBOSE_THINKING"
+    printf "Show Reasoning: %s\n" "$SHOW_REASONING"
+    
+    # Check if dependencies are available
+    printf "\n${COLOR_BRIGHT}${COLOR_BLUE}🔧 DEPENDENCIES:${COLOR_RESET}\n"
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    for dep in "${deps[@]}"; do
+        if command -v "$dep" &> /dev/null; then
+            printf "  ${COLOR_GREEN}✅ %s${COLOR_RESET}\n" "$dep"
+        else
+            printf "  ${COLOR_RED}❌ %s${COLOR_RESET}\n" "$dep"
+        fi
+    done
+    
+    # Check Node modules
+    printf "\n${COLOR_BRIGHT}${COLOR_MAGENTA}📦 NODE MODULES:${COLOR_RESET}\n"
+    local node_modules=("sqlite3")
+    for module in "${node_modules[@]}"; do
+        if [ -d "$NODE_MODULES/$module" ]; then
+            printf "  ${COLOR_GREEN}✅ %s${COLOR_RESET}\n" "$module"
+        else
+            printf "  ${COLOR_RED}❌ %s${COLOR_RESET}\n" "$module"
+        fi
+    done
+    
+    # Show recent projects
+    printf "\n${COLOR_BRIGHT}${COLOR_MAGENTA}📁 RECENT PROJECTS:${COLOR_RESET}\n"
+    if [ -f "$WEB_CONFIG_DB" ]; then
+        sqlite3 "$WEB_CONFIG_DB" "SELECT name, framework, status, datetime(ts) FROM projects ORDER BY ts DESC LIMIT 5;" 2>/dev/null | while IFS='|' read name framework status timestamp; do
+            printf "  🗂️  %s (%s) - %s\n" "$name" "$framework" "$status"
+            printf "     📅 %s\n" "$timestamp"
+        done || printf "  No projects yet\n"
+    else
+        printf "  No projects database found\n"
+    fi
+    
+    # Show system stats
+    printf "\n${COLOR_BRIGHT}${COLOR_GREEN}📊 SYSTEM STATS:${COLOR_RESET}\n"
+    if [ -f "$AI_DATA_DB" ]; then
+        local total_tasks=$(sqlite3 "$AI_DATA_DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo "0")
+        local total_events=$(sqlite3 "$AI_DATA_DB" "SELECT COUNT(*) FROM events;" 2>/dev/null || echo "0")
+        printf "  Total Tasks: %s\n" "$total_tasks"
+        printf "  Total Events: %s\n" "$total_events"
+    fi
+    
+    # Show disk usage
+    if [ -d "$AI_HOME" ]; then
+        local disk_usage=$(du -sh "$AI_HOME" 2>/dev/null | cut -f1)
+        printf "  Disk Usage: %s\n" "$disk_usage"
+    fi
+    
+    printf "\n${COLOR_BRIGHT}${COLOR_YELLOW}💡 TIP: Use '--verbose' to toggle thinking mode, '--quiet' for silent mode${COLOR_RESET}\n"
+}
+
+# --- Enhanced Logging with Verbose Support ---
+log_event() {
+    local level="$1" message="$2" metadata="${3:-}" color="$COLOR_CYAN"
+    case "$level" in
+        "ERROR") color="$COLOR_RED" ;; "WARN") color="$COLOR_YELLOW" ;;
+        "SUCCESS") color="$COLOR_GREEN" ;; "INFO") color="$COLOR_BLUE" ;;
+        "DEBUG") color="$COLOR_MAGENTA" ;; "THINKING") color="$COLOR_CYAN" ;;
+    esac
+    
+    echo -e "[${color}${level}${COLOR_RESET}] $(date +%H:%M:%S): $message"
+    
+    local message_esc=$(sed "s/'/''/g" <<< "$message")
+    local metadata_esc=$(sed "s/'/''/g" <<< "$metadata")
+    sqlite3 "$AI_DATA_DB" <<EOF || true
+INSERT INTO events (event_type, message, metadata) VALUES ('$level', '$message_esc', '$metadata_esc');
+EOF
+}
+
+# --- Thinking Animation and Verbose Output ---
+thinking() {
+    local message="$1" depth="${2:-0}" indent=""
+    for ((i=0; i<depth; i++)); do indent+="  "; done
+    
+    if [ "$VERBOSE_THINKING" = "true" ]; then
+        echo -e "${indent}🤔 ${COLOR_CYAN}THINKING${COLOR_RESET}: $message"
+        sleep "$THINKING_DELAY"
+    fi
+}
+
+show_reasoning() {
+    local reasoning="$1" context="$2"
+    
+    if [ "$SHOW_REASONING" = "true" ] && [ -n "$reasoning" ]; then
+        echo -e "\n${COLOR_YELLOW}💭 REASONING [$context]:${COLOR_RESET}"
+        echo -e "${COLOR_GRAY}$reasoning${COLOR_RESET}"
+        echo -e "${COLOR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+    fi
+}
+
+# --- Fixed Dependency Installation ---
+install_node_modules() {
+    thinking "Installing Node.js modules..." 1
+    
+    if [ ! -f "$AI_HOME/package.json" ]; then
+        cat > "$AI_HOME/package.json" << 'PKG_JSON'
+{
+  "name": "webdev-ai-orchestrator",
+  "version": "1.0.0",
+  "description": "WebDev AI Code Engine Orchestrator",
+  "type": "module",
+  "dependencies": {
+    "sqlite3": "^5.1.6"
+  }
+}
+PKG_JSON
+    fi
+    
+    thinking "Running npm install in $AI_HOME..." 2
+    cd "$AI_HOME"
+    
+    if [ ! -d "$NODE_MODULES/sqlite3" ]; then
+        thinking "Installing sqlite3..." 3
+        npm install sqlite3 --save --loglevel=error
+        if [ $? -eq 0 ]; then
+            log_event "SUCCESS" "Installed sqlite3"
+        else
+            log_event "ERROR" "Failed to install sqlite3"
+        fi
+    fi
+    
+    thinking "Verifying module installation..." 2
+    if [ -d "$NODE_MODULES/sqlite3" ]; then
+        thinking "✅ sqlite3 installed successfully" 3
+    else
+        thinking "❌ sqlite3 failed to install" 3
+        log_event "ERROR" "Module sqlite3 not found after installation"
+    fi
+    
+    cd - > /dev/null
+}
+
+check_node_modules() {
+    thinking "Checking Node.js modules..." 1
+    
+    if [ ! -d "$NODE_MODULES/sqlite3" ]; then
+        thinking "sqlite3 module missing, installing..." 2
+        install_node_modules
+    else
+        thinking "All Node.js modules are installed" 2
+    fi
+}
+
+check_dependencies() {
+    thinking "Checking system dependencies..." 1
+    local missing_deps=()
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    check_node_modules
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        log_event "ERROR" "Missing dependencies: ${missing_deps[*]}"
+        echo "Please install missing dependencies: ${missing_deps[*]}"
+        exit 1
+    fi
+    
+    log_event "SUCCESS" "All dependencies satisfied"
+}
+
+# Web Development Framework Detection (Simplified for Bash)
+detect_frameworks() {
+    local project_path="${1:-$PWD}"
+    local frameworks=()
+    
+    # This is a placeholder now, as the Node.js orchestrator handles the real logic
+    frameworks+=("node" "react")
+    
+    show_reasoning "Detected frameworks: ${frameworks[*]}" "Framework Detection"
+    echo "${frameworks[@]}"
+}
+
+# --- Enhanced Database Initialization ---
+init_databases() {
+    thinking "Initializing databases..." 1
+    mkdir -p "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR"
+
+    # Enhanced ai_data.db
+    sqlite3 "$AI_DATA_DB" <<SQL 2>/dev/null
+CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
+    prompt TEXT,
+    response TEXT,
+    proof_state TEXT,
+    framework TEXT,
+    complexity INTEGER DEFAULT 1,
+    reasoning_log TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT,
+    message TEXT,
+    metadata TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS web_components (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    type TEXT,
+    framework TEXT,
+    code TEXT,
+    dependencies TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS reasoning_chains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
+    step INTEGER,
+    reasoning TEXT,
+    context TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS model_usage (
+    task_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    PRIMARY KEY (task_id, model_name)
+);
+SQL
+
+    # Enhanced blobs.db
+    sqlite3 "$BLOBS_DB" <<SQL 2>/dev/null
+CREATE TABLE IF NOT EXISTS blobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_name TEXT,
+    file_path TEXT,
+    content BLOB,
+    file_type TEXT,
+    framework TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS scripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    type TEXT,
+    code TEXT,
+    description TEXT,
+    usage_count INTEGER DEFAULT 0,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+SQL
+
+    # Web configuration database
+    sqlite3 "$WEB_CONFIG_DB" <<SQL 2>/dev/null
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE,
+    framework TEXT,
+    port INTEGER,
+    domain TEXT,
+    status TEXT DEFAULT 'inactive',
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS deployments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_name TEXT,
+    environment TEXT,
+    status TEXT,
+    url TEXT,
+    logs TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS api_endpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_name TEXT,
+    method TEXT,
+    path TEXT,
+    handler TEXT,
+    middleware TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+SQL
+
+    log_event "SUCCESS" "Enhanced databases initialized"
+}
+
+# --- Fixed Orchestrator with Working Colors (## MODIFIED FOR MATH/DYNAMIC LOGIC ##) ---
+setup_orchestrator() {
+    log_event "INFO" "Setting up enhanced orchestrator with dynamic math logic..."
+    mkdir -p "$AI_HOME"
+    cat > "$ORCHESTRATOR_FILE" <<'EOF_JS'
+// Enhanced WebDev Code-Engine with Dynamic Math Logic
 import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -12,12 +359,10 @@ const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 const AI_DATA_DB = process.env.AI_DATA_DB;
-const SLOWER_MODELS_ENV = process.env.SLOWER_MODELS || "llama3:70b,mixtral:8x7b"; // Default slower models
 
 // Enhanced Model Pool for Web Development (Default/Fallback)
 const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
-const SLOWER_MODELS = SLOWER_MODELS_ENV.split(',');
-const SLOWER_MODEL_ACTIVATION_CHANCE = 0.3; // 30% chance to engage a slower model for review
+const MODEL_WEIGHTS = { "2244:latest": 2, "core:latest": 2, "loop:latest": 1, "coin:latest": 1, "code:latest": 2 };
 
 // Working color implementation using template literals
 const colors = {
@@ -79,9 +424,11 @@ const genCircularIndex = () => {
     const now = new Date();
     const secondsOfDay = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
     
+    // 2*pi * 1,000,000 for integer scaling
     const scaledPi2 = 6283185; 
     const scaledIndex = Math.floor((secondsOfDay / secondsInDay) * scaledPi2);
     
+    // Format as 7-digit string
     return scaledIndex.toString().padStart(7, '0');
 };
 
@@ -90,6 +437,7 @@ const genRecursiveHash = (prompt) => {
     const circularIndex = genCircularIndex();
     const baseString = `${promptHash}.${circularIndex}`;
 
+    // Recursive Hashing: hash.rehash.hashing.hash.hashed.index
     const hash1 = crypto.createHash('sha256').update(baseString).digest('hex').substring(0, 4);
     const hash2 = crypto.createHash('sha256').update(hash1 + baseString).digest('hex').substring(4, 8);
     const hash3 = crypto.createHash('sha256').update(hash2 + hash1 + baseString).digest('hex').substring(8, 12);
@@ -99,54 +447,6 @@ const genRecursiveHash = (prompt) => {
     return `${hash1}.${hash2}.${hash3}.${hash4}.${hash5}.${circularIndex}`;
 };
 
-// --- NEW: Deterministic Random Integer from Hash ---
-const getDeterministicRandomInt = (seedString, min, max) => {
-    const hash = crypto.createHash('sha256').update(seedString).digest('hex');
-    // Take a portion of the hash and convert to integer
-    const intValue = parseInt(hash.substring(0, 8), 16); 
-    return min + (intValue % (max - min + 1));
-};
-
-// --- NEW: Get Google Ping Entropy ---
-const getGooglePingEntropy = async () => {
-    try {
-        think("Pinging google.com for external entropy...", 2);
-        // Use 'ping -c 1' for a single packet on Linux/macOS, '-n 1' on Windows
-        const command = process.platform === 'win32' ? 'ping -n 1 google.com' : 'ping -c 1 google.com';
-        const { stdout } = await new Promise((resolve, reject) => {
-            exec(command, (error, stdout, stderr) => {
-                if (error) {
-                    // Log error but don't reject, return 0 for graceful fallback
-                    console.error(colors.redText(`[PING ERROR] Failed to ping google.com: ${error.message}`));
-                    return resolve({ stdout: '', stderr: error.message });
-                }
-                resolve({ stdout, stderr });
-            });
-        });
-
-        // Extract average RTT (example for Linux/macOS, might need adjustment for Windows)
-        let rttMatch;
-        if (process.platform === 'win32') {
-            rttMatch = stdout.match(/Average = (\d+)ms/);
-        } else {
-            rttMatch = stdout.match(/rtt min\/avg\/max\/mdev = [0-9.]+\/([0-9.]+)/);
-        }
-        
-        if (rttMatch && rttMatch[1]) {
-            const avgRtt = parseFloat(rttMatch[1]);
-            think(`Google Ping RTT: ${avgRtt}ms`, 2);
-            return avgRtt;
-        } else {
-            think("Could not parse ping RTT from output.", 2);
-            return 0; // Default to 0 if parsing fails
-        }
-    } catch (e) {
-        console.error(colors.redText(`[PING EXCEPTION] ${e.message}`));
-        return 0; // Default to 0 on error
-    }
-};
-
-
 // --- Dynamic Model Selection (Ported to Node.js) ---
 const selectDynamicModels = (framework, complexity) => {
     return new Promise((resolve, reject) => {
@@ -154,6 +454,8 @@ const selectDynamicModels = (framework, complexity) => {
         const db = getDb();
         const POOL_SIZE = 3;
         
+        // In a real Node.js app, we'd query Ollama's API for available models.
+        // Here, we use the hardcoded list as a proxy for available models.
         const availableModels = WEB_DEV_MODELS; 
         
         if (availableModels.length === 0) {
@@ -194,12 +496,14 @@ const selectDynamicModels = (framework, complexity) => {
         Promise.all(promises).then(() => {
             db.close();
             
+            // Sort models by score
             const sortedModels = Object.entries(modelScores)
                 .sort(([, scoreA], [, scoreB]) => scoreB - scoreA)
                 .map(([model]) => model);
 
             let dynamicPool = sortedModels.slice(0, POOL_SIZE);
             
+            // Fallback to fill the pool if not enough history
             if (dynamicPool.length < POOL_SIZE) {
                 availableModels.forEach(model => {
                     if (!dynamicPool.includes(model)) {
@@ -236,7 +540,7 @@ const updateModelUsage = (taskId, modelPool) => {
 class WebDevProofTracker {
     constructor(initialPrompt, detectedFrameworks = [], taskId) {
         this.taskId = taskId;
-        this.cycleIndex = 0; 
+        this.cycleIndex = 0; // Start at 0 for the loop
         this.netWorthIndex = 0;
         this.entropyRatio = (initialPrompt.length ^ Date.now()) / 1000;
         this.frameworks = detectedFrameworks;
@@ -245,6 +549,7 @@ class WebDevProofTracker {
     }
 
     calculateComplexity(prompt) {
+        // ... (Complexity logic remains the same) ...
         think("Calculating task complexity...", 1);
         let score = 0;
         const complexityKeywords = [
@@ -259,16 +564,12 @@ class WebDevProofTracker {
         return Math.min(score, 10);
     }
 
-    async crosslineEntropy(data) { // Made async
-        think("Analyzing output entropy and incorporating external factors...", 1);
+    crosslineEntropy(data) {
+        think("Analyzing output entropy...", 1);
         const hash = crypto.createHash('sha256').update(data).digest('hex');
         this.entropyRatio += parseInt(hash.substring(0, 8), 16);
         
-        // Incorporate Google Ping RTT for external entropy
-        const pingRtt = await getGooglePingEntropy();
-        this.entropyRatio += pingRtt; // Add RTT to entropy ratio
-
-        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}..., ping: ${pingRtt}ms)`, 'Entropy Analysis');
+        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}...)`, 'Entropy Analysis');
     }
 
     proofCycle(converged, frameworkUsed = '', reasoning = '') {
@@ -281,13 +582,14 @@ class WebDevProofTracker {
         
         let finalConverged = converged;
         
-        // ## 2π Modulo Logical Algorithm ##
+        // ## NEW: 2π Modulo Logical Algorithm ##
         const circularIndex = parseInt(genCircularIndex());
+        // Dynamic threshold is 1, 2, or 3, based on the time of day (modulo 3 + 1)
         const dynamicThreshold = (circularIndex % 3) + 1; 
 
         if (this.netWorthIndex >= dynamicThreshold) {
             reasoning += ` Dynamic threshold (${dynamicThreshold}) met. Accelerating convergence.`;
-            finalConverged = true; 
+            finalConverged = true; // Force convergence
         }
         
         if (reasoning) {
@@ -321,16 +623,17 @@ class WebDevOrchestrator {
     constructor(prompt, options) {
         this.initialPrompt = prompt;
         this.options = options;
-        this.taskId = genRecursiveHash(prompt); 
+        this.taskId = genRecursiveHash(prompt); // Use the new math-based ID
         this.detectedFrameworks = this.detectFrameworksFromPrompt(prompt);
         this.proofTracker = new WebDevProofTracker(prompt, this.detectedFrameworks, this.taskId);
-        this.modelPool = WEB_DEV_MODELS; 
+        this.modelPool = WEB_DEV_MODELS; // Default, will be overwritten
         
         think(`Initialized orchestrator for task: ${prompt.substring(0, 100)}...`, 0);
         showReasoning(`Task ID (2π-indexed): ${this.taskId}`, 'Task ID Generation');
     }
 
     detectFrameworksFromPrompt(prompt) {
+        // ... (Framework detection logic remains the same) ...
         think("Analyzing prompt for framework indicators...", 1);
         const frameworkKeywords = {
             react: ['react', 'jsx', 'component', 'hook'],
@@ -354,6 +657,7 @@ class WebDevOrchestrator {
     }
 
     getEnhancedSystemPrompt(framework) {
+        // ... (System prompt logic remains the same) ...
         think(`Generating system prompt for ${framework}...`, 1);
         const basePrompt = `You are a ${framework} expert. Create production-ready code with best practices.`;
         
@@ -373,24 +677,14 @@ User Task: `;
         return enhancedPrompt;
     }
 
-    async readProjectFile(filePath) {
-        try {
-            const content = fs.readFileSync(filePath, 'utf8');
-            think(`Successfully read file: ${filePath}`, 1);
-            return `--- START FILE: ${filePath} ---\n${content}\n--- END FILE: ${filePath} ---\n\n`;
-        } catch (error) {
-            console.error(colors.redText(`[FILE ERROR] Could not read file ${filePath}: ${error.message}`));
-            return `--- FILE READ ERROR: ${filePath} ---\n`;
-        }
-    }
-
     async runOllama(model, currentPrompt, framework, iteration) {
         return new Promise((resolve, reject) => {
             const enhancedPrompt = this.getEnhancedSystemPrompt(framework) + currentPrompt;
+            think(`Model ${model} processing (iteration ${iteration})...`, 2);
             
-            // Log the start of the model's thinking process
             console.log(colors.blueText(`\n[${framework.toUpperCase()}-ITERATION-${iteration}]`), colors.yellowText(`${model} thinking...`));
             
+            // Use the streaming logic from the Bash script (simulated via exec)
             const command = `${OLLAMA_BIN} run ${model} "${enhancedPrompt.replace(/"/g, '\\"')}"`;
             const child = exec(command);
             let output = '';
@@ -431,8 +725,9 @@ User Task: `;
     }
 
     async recursiveConsensus() {
-        think("Starting recursive consensus process (MAX PARALLELISM)...", 1);
+        think("Starting recursive consensus process...", 1);
         
+        // 1. Dynamic Model Selection
         this.modelPool = await selectDynamicModels(this.detectedFrameworks[0] || 'node', this.proofTracker.complexityScore);
         
         let currentPrompt = this.initialPrompt;
@@ -443,14 +738,15 @@ User Task: `;
         for (let i = 0; i < 3 && !converged; i++) {
             think(`Consensus iteration ${i + 1}/3...`, 2);
             
-            // MAX PARALLELISM: Launch all models simultaneously using Promise.all
             const promises = this.modelPool.map((model, index) => {
+                think(`Launching model ${index + 1}/${this.modelPool.length}: ${model}`, 3);
                 return this.runOllama(model, currentPrompt, bestFramework, i + 1).catch(e => {
-                    return e; // Capture error but don't stop Promise.all
+                    think(`Model ${model} failed: ${e}`, 3);
+                    return e;
                 });
             });
             
-            think("Waiting for all models to complete asynchronously...", 2);
+            think("Waiting for all models to complete...", 2);
             const results = await Promise.all(promises);
             const validResults = results.filter(r => 
                 typeof r === 'string' && r.length > 0 && !r.startsWith('OLLAMA EXECUTION ERROR')
@@ -462,62 +758,32 @@ User Task: `;
             }
 
             think(`Fusing ${validResults.length} valid outputs...`, 2);
-            await this.proofTracker.crosslineEntropy(validResults.join('')); // AWAIT here
+            this.proofTracker.crosslineEntropy(validResults.join(''));
             const fusedOutput = this.fuseWebOutputs(validResults);
             
             const convergenceReasoning = `Iteration ${i + 1}: ${fusedOutput === lastFusedOutput ? 'Outputs converged' : 'Outputs still diverging'}`;
             const initialConverged = fusedOutput === lastFusedOutput;
             
-            // Proof Cycle with Dynamic Math Logic
+            // 2. Proof Cycle with Dynamic Math Logic
             converged = this.proofTracker.proofCycle(initialConverged, bestFramework, convergenceReasoning);
             
-            // --- NEW: Slower Model Control Step ---
-            const randomChance = getDeterministicRandomInt(this.taskId + String(i), 0, 100);
-            if (SLOWER_MODELS.length > 0 && randomChance < (SLOWER_MODEL_ACTIVATION_CHANCE * 100)) {
-                think(`Deterministic random chance (${randomChance}%) triggered slower model review.`, 2);
-                const slowerModelIndex = getDeterministicRandomInt(this.taskId + String(i) + "slower", 0, SLOWER_MODELS.length - 1);
-                const selectedSlowerModel = SLOWER_MODELS[slowerModelIndex];
-                
-                const reviewPrompt = `Review and refine the following output based on the original task: "${this.initialPrompt}". Focus on accuracy, completeness, and best practices. Return ONLY the refined output.
-
-Output to review:
-\`\`\`
-${fusedOutput}
-\`\`\`
-
-Your refined output:`;
-                
-                think(`Engaging slower model (${selectedSlowerModel}) for review...`, 2);
-                const refinedOutput = await this.runOllama(selectedSlowerModel, reviewPrompt, bestFramework, i + 1 + "_review").catch(e => {
-                    console.error(colors.redText(`[SLOWER MODEL ERROR] ${e}`));
-                    return fusedOutput; // Fallback to original if slower model fails
-                });
-                
-                showReasoning(`Slower model (${selectedSlowerModel}) refined output.`, 'Slower Model Control');
-                currentPrompt = this.initialPrompt + `\n\nPrevious iteration (refined) output for improvement:\n${refinedOutput}`;
-                lastFusedOutput = refinedOutput; // Update lastFusedOutput with refined version
-            } else {
-                if (SLOWER_MODELS.length > 0) {
-                    think(`Slower model review skipped this iteration (chance: ${randomChance}%).`, 2);
-                }
-                currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
-                lastFusedOutput = fusedOutput;
-            }
-            // --- END Slower Model Control Step ---
-
             if (converged) {
                 think("Consensus achieved! Dynamic threshold met or outputs converged.", 2);
             } else {
                 think("No consensus yet, continuing to next iteration...", 2);
             }
+
+            lastFusedOutput = fusedOutput;
+            currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
         }
 
         think("Consensus process completed", 1);
-        await updateModelUsage(this.taskId, this.modelPool); 
+        await updateModelUsage(this.taskId, this.modelPool); // Log usage
         return lastFusedOutput;
     }
 
     fuseWebOutputs(results) {
+        // ... (Fusion logic remains the same) ...
         think(`Fusing ${results.length} model outputs...`, 2);
         
         const scoredResults = results.map(output => {
@@ -529,36 +795,32 @@ Your refined output:`;
         });
         
         scoredResults.sort((a, b) => b.score - a.score);
-        const bestOutput = scoredResults.output; // FIX: Access 'output' property of the first element
+        const bestOutput = scoredResults.output;
         
         showReasoning(`Selected output with score ${scoredResults[0].score}`, 'Output Fusion');
         return bestOutput;
     }
 
     parseEnhancedCodeBlocks(content) {
-        // CRITICAL FIX: Ensure content is a string before attempting to use it.
-        if (typeof content !== 'string' || content.length === 0) {
-            return [];
-        }
-        
+        // ... (Code block parsing logic remains the same) ...
         const regex = /```(\w+)\s*([\s\S]*?)```/g;
         const blocks = [];
         let match;
         
         while ((match = regex.exec(content)) !== null) {
-            const language = match; // FIX: Capture group 1 is language
-            let code = match.trim(); // FIX: Capture group 2 is code
+            const language = match;
+            let code = match.trim();
             
             blocks.push({ 
                 language: language, 
                 code: code,
-                framework: this.detectedFrameworks || 'node' // Use first detected framework
+                framework: this.detectedFrameworks || 'node'
             });
         }
         
         if (blocks.length === 0 && content.trim().length > 0) {
             blocks.push({
-                language: 'javascript', // Default to JS if no language specified but content exists
+                language: 'javascript',
                 code: content.trim(),
                 framework: this.detectedFrameworks || 'node'
             });
@@ -567,42 +829,14 @@ Your refined output:`;
         return blocks;
     }
 
-    async handleFileModification(filePath, newContent) {
-        think(`Applying modification to file: ${filePath}`, 1);
-        try {
-            fs.writeFileSync(filePath, newContent);
-            console.log(colors.boldGreen(`[SUCCESS] MODIFIED FILE: ${filePath}`));
-        } catch (error) {
-            console.error(colors.redText(`[ERROR] Failed to modify file ${filePath}: ${error.message}`));
-        }
-    }
-
     async handleEnhancedCodeGeneration(content) {
+        // ... (Code generation logic remains the same) ...
         const blocks = this.parseEnhancedCodeBlocks(content);
         if (!blocks.length) {
             think("No code blocks found in output", 1);
             return;
         }
 
-        // 1. Check for MODIFY_FILE directive
-        const modifyRegex = /^\s*MODIFY_FILE:\s*([^\s]+)\s*$/m;
-        const modifyMatch = content.match(modifyRegex);
-
-        if (modifyMatch) {
-            const targetPath = modifyMatch; // FIX: Capture group 1 for the path
-            const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
-            const projectPath = path.join(PROJECTS_DIR, project);
-            const fullPath = path.join(projectPath, targetPath);
-
-            if (blocks.length === 1) {
-                await this.handleFileModification(fullPath, blocks.code); // FIX: Access code from the first block
-            } else {
-                console.error(colors.redText(`[ERROR] MODIFY_FILE directive found, but output contains ${blocks.length} code blocks. Only one block is supported for modification.`));
-            }
-            return;
-        }
-
-        // 2. Default to NEW FILE generation
         const project = this.options.project || `webapp_${this.taskId.substring(0, 8)}`;
         const projectPath = path.join(PROJECTS_DIR, project);
         
@@ -630,13 +864,6 @@ Your refined output:`;
     async execute() {
         think("Starting WebDev AI execution...", 0);
         
-        // 1. Read file content if --file option is present
-        if (this.options.file) {
-            const fileContent = await this.readProjectFile(this.options.file);
-            this.initialPrompt = fileContent + this.initialPrompt;
-            showReasoning(`Injected file content from: ${this.options.file}`, 'File Context');
-        }
-
         console.log(colors.boldCyan("\n🚀 WEBDEV AI CODE ENGINE STARTING..."));
         console.log(colors.cyanText("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
         
@@ -657,31 +884,14 @@ Your refined output:`;
 // Enhanced CLI with verbose thinking
 (async () => {
     const args = process.argv.slice(2);
-    
-    // Parse options and collect positional arguments
-    const options = {};
-    const positionalArgs = [];
-    
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (arg.startsWith('--')) {
+    const prompt = args.filter(arg => !arg.startsWith('--')).join(' ');
+
+    const options = Object.fromEntries(
+        args.filter(arg => arg.startsWith('--')).map(arg => {
             const parts = arg.slice(2).split('=');
-            const key = parts; // FIX: key is the first part
-            const value = parts.length > 1 ? parts.slice(1).join('=') : true;
-            
-            // Special handling for --file
-            if (key === 'file' && typeof value === 'boolean') { // If --file is passed without =, expect path as next arg
-                options[key] = args[i + 1];
-                i++; // Skip next argument
-            } else {
-                options[key] = value;
-            }
-        } else {
-            positionalArgs.push(arg);
-        }
-    }
-    
-    const prompt = positionalArgs.join(' ');
+            return [parts, parts.length > 1 ? parts.slice(1).join('=') : true];
+        })
+    );
 
     if (!prompt) {
         console.log(colors.redText('Error: No prompt provided. Usage: webdev-ai "create a react component for user dashboard"'));
@@ -694,3 +904,132 @@ Your refined output:`;
     const orchestrator = new WebDevOrchestrator(prompt, options);
     await orchestrator.execute();
 })();
+EOF_JS
+
+    log_event "SUCCESS" "Enhanced orchestrator with dynamic math logic created"
+}
+
+# --- Enhanced AI Task Runner with Verbose Thinking ---
+run_webdev_task() {
+    local full_prompt="$*"
+    local frameworks=$(detect_frameworks)
+
+    thinking "Analyzing user request..." 0
+    show_reasoning "User request: $full_prompt" "Input Analysis"
+
+    if [[ "$full_prompt" =~ (component|api|server|database|deploy|build|responsive) ]]; then
+        thinking "Web development task detected" 1
+        full_prompt="WEB DEVELOPMENT: $full_prompt - Generate complete, production-ready code with all necessary files."
+    fi
+
+    if [ -f "$SESSION_FILE" ]; then
+        local proj=$(cat "$SESSION_FILE")
+        thinking "Active session detected: $proj" 1
+        full_prompt="$full_prompt --project=$proj"
+    fi
+
+    log_event "TASK_START" "WebDev Prompt: $full_prompt | Frameworks: $frameworks"
+    
+    echo -e "\n${COLOR_MAGENTA}🎯 STARTING WEBDEV AI TASK${COLOR_RESET}"
+    echo -e "${COLOR_GRAY}Task: $full_prompt${COLOR_RESET}"
+    echo -e "${COLOR_MAGENTA}──────────────────────────────────────────────────────────────${COLOR_RESET}\n"
+    
+    # Run with proper Node.js module resolution
+    cd "$AI_HOME"
+    node "$ORCHESTRATOR_FILE" $full_prompt
+    cd - > /dev/null
+    
+    log_event "TASK_END" "Web development task completed"
+}
+
+# --- Toggle Verbose Mode ---
+toggle_verbose() {
+    if [ "$VERBOSE_THINKING" = "true" ]; then
+        export VERBOSE_THINKING="false"
+        export SHOW_REASONING="false"
+        echo "Verbose thinking: DISABLED"
+    else
+        export VERBOSE_THINKING="true"
+        export SHOW_REASONING="true"
+        echo "Verbose thinking: ENABLED"
+    fi
+}
+
+# --- Installation Function ---
+install_webdev_ai() {
+    echo -e "\n${COLOR_BRIGHT}${COLOR_CYAN}🚀 INSTALLING WEBDEV AI CODE ENGINE${COLOR_RESET}"
+    echo -e "${COLOR_GRAY}=========================================${COLOR_RESET}"
+    
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR" "$LOG_DIR"
+    
+    check_dependencies
+    init_databases
+    setup_orchestrator
+    
+    echo -e "\n${COLOR_BRIGHT}${COLOR_GREEN}✅ INSTALLATION COMPLETED SUCCESSFULLY!${COLOR_RESET}"
+    echo -e "${COLOR_BRIGHT}${COLOR_YELLOW}💡 Usage examples:${COLOR_RESET}"
+    echo "  webdev-ai 'create a React component for user dashboard'"
+    echo "  webdev-ai --start my-project"
+    echo "  webdev-ai status"
+    echo "  webdev-ai --verbose  # Toggle thinking mode"
+}
+
+# --- Main Enhanced Execution ---
+main() {
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR"
+    
+    check_dependencies
+    init_databases
+    setup_orchestrator
+
+    if [ $# -eq 0 ]; then
+        enhanced_status
+        exit 0
+    fi
+
+    COMMAND="$1"
+    shift
+
+    case "$COMMAND" in
+        --start)
+            read -p "Project/Repo name: " proj
+            echo "$proj" > "$SESSION_FILE"
+            log_event "SESSION" "Started web development session for $proj"
+            thinking "Session started for project: $proj" 0
+            ;;
+        --stop)
+            [ -f "$SESSION_FILE" ] && proj=$(cat "$SESSION_FILE") && log_event "SESSION" "Stopped session for $proj"
+            rm -f "$SESSION_FILE"
+            thinking "Session stopped" 0
+            ;;
+        --verbose|--think)
+            toggle_verbose
+            ;;
+        --quiet)
+            export VERBOSE_THINKING="false"
+            export SHOW_REASONING="false"
+            echo "Verbose thinking: DISABLED"
+            ;;
+        --install)
+            install_webdev_ai
+            ;;
+        run)
+            run_webdev_task "$@"
+            ;;
+        status)
+            enhanced_status
+            ;;
+        --create-component)
+            run_webdev_task "Create a React/Vue component for: $@"
+            ;;
+        --create-api)
+            run_webdev_task "Create a Node.js/Express API endpoint for: $@"
+            ;;
+        *)
+            run_webdev_task "$COMMAND $@"
+            ;;
+    esac
+}
+
+# --- Execute Main Function ---
+main "$@"
