@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+# ███████╗██╗   ██╗███████╗ ██████╗ ██████╗ █████╗ ██╗    ██████╗ ██████╗ ██████╗ ███████╗
+# ██╔════╝╚██╗ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║    ██╔══██╗██╔══██╗██╔══██╗██╔════╝
+# ███████╗ ╚████╔╝ █████╗  ██║   ██║██████╔╝███████║██║    ██║  ██║██████╔╝██████╔╝█████╗  
+# ╚════██║  ╚██╔╝  ██╔══╝  ██║   ██║██╔═══╝ ██╔══██║██║    ██║  ██║██╔═══╝ ██╔═══╝ ██╔══╝  
+# ███████║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██████╔╝██║     ██║     ███████╗
+# ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝     ╚══════╝
+#
 # WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
-# Version: 8.3.0 (Asynchronous Concurrency Fixes)
+# Version: 8.1.0 (Consolidated Features & Bug Fixes)
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -136,7 +145,7 @@ show_reasoning() {
     if [ "$SHOW_REASONING" = "true" ] && [ -n "$reasoning" ]; then
         echo -e "\n${COLOR_YELLOW}💭 REASONING [$context]:${COLOR_RESET}"
         echo -e "${COLOR_GRAY}$reasoning${COLOR_RESET}"
-        echo -e "${COLOR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        echo -e "${COLOR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
     fi
 }
 
@@ -409,7 +418,7 @@ record_hash() {
     local type="$1" target="$2" hash="$3"
     log_event "DEBUG" "Recording hash: $type:$target -> $hash"
 
-    if sqlite3 "$WEB_CONFIG_DB" "INSERT OR REPLACE INTO hashes (type, target, hash) VALUES ('$(sqlite_escape "$type")', '$(sqlite_escape "$target")', '$(sqlite_escape "$hash")');" 2>/dev/null; then
+    if sqlite3 "$WEB_CONFIG_DB" "INSERT OR REPLACE INTO hashes (type, target, hash) VALUES ('$(sqlite_escape "$type")', '$(sqlite_escape "$target")', '$hash');" 2>/dev/null; then
         log_event "INFO" "Recorded hash for $type: $target"
     else
         log_event "WARN" "Failed to record hash for $type: $target"
@@ -448,12 +457,10 @@ const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 const AI_DATA_DB = process.env.AI_DATA_DB;
-const SLOWER_MODELS_ENV = process.env.SLOWER_MODELS || "llama3:70b,mixtral:8x7b"; // Default slower models
 
 // Enhanced Model Pool for Web Development (Default/Fallback)
 const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
-const SLOWER_MODELS = SLOWER_MODELS_ENV.split(',');
-const SLOWER_MODEL_ACTIVATION_CHANCE = 0.3; // 30% chance to engage a slower model for review
+const MODEL_WEIGHTS = { "2244:latest": 2, "core:latest": 2, "loop:latest": 1, "coin:latest": 1, "code:latest": 2 };
 
 // Working color implementation using template literals
 const colors = {
@@ -533,14 +540,6 @@ const genRecursiveHash = (prompt) => {
     const hash5 = crypto.createHash('sha256').update(hash4 + hash3 + hash2 + hash1 + baseString).digest('hex').substring(16, 20);
 
     return `${hash1}.${hash2}.${hash3}.${hash4}.${hash5}.${circularIndex}`;
-};
-
-// --- NEW: Deterministic Random Integer from Hash ---
-const getDeterministicRandomInt = (seedString, min, max) => {
-    const hash = crypto.createHash('sha256').update(seedString).digest('hex');
-    // Take a portion of the hash and convert to integer
-    const intValue = parseInt(hash.substring(0, 8), 16); 
-    return min + (intValue % (max - min + 1));
 };
 
 // --- Dynamic Model Selection (Ported to Node.js) ---
@@ -863,45 +862,14 @@ User Task: `;
             // Proof Cycle with Dynamic Math Logic
             converged = this.proofTracker.proofCycle(initialConverged, bestFramework, convergenceReasoning);
             
-            // --- NEW: Slower Model Control Step ---
-            const randomChance = getDeterministicRandomInt(this.taskId + String(i), 0, 100);
-            if (SLOWER_MODELS.length > 0 && randomChance < (SLOWER_MODEL_ACTIVATION_CHANCE * 100)) {
-                think(`Deterministic random chance (${randomChance}%) triggered slower model review.`, 2);
-                const slowerModelIndex = getDeterministicRandomInt(this.taskId + String(i) + "slower", 0, SLOWER_MODELS.length - 1);
-                const selectedSlowerModel = SLOWER_MODELS[slowerModelIndex];
-                
-                const reviewPrompt = `Review and refine the following output based on the original task: "${this.initialPrompt}". Focus on accuracy, completeness, and best practices. Return ONLY the refined output.
-
-Output to review:
-\`\`\`
-${fusedOutput}
-\`\`\`
-
-Your refined output:`;
-                
-                think(`Engaging slower model (${selectedSlowerModel}) for review...`, 2);
-                const refinedOutput = await this.runOllama(selectedSlowerModel, reviewPrompt, bestFramework, i + 1 + "_review").catch(e => {
-                    console.error(colors.redText(`[SLOWER MODEL ERROR] ${e}`));
-                    return fusedOutput; // Fallback to original if slower model fails
-                });
-                
-                showReasoning(`Slower model (${selectedSlowerModel}) refined output.`, 'Slower Model Control');
-                currentPrompt = this.initialPrompt + `\n\nPrevious iteration (refined) output for improvement:\n${refinedOutput}`;
-                lastFusedOutput = refinedOutput; // Update lastFusedOutput with refined version
-            } else {
-                if (SLOWER_MODELS.length > 0) {
-                    think(`Slower model review skipped this iteration (chance: ${randomChance}%).`, 2);
-                }
-                currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
-                lastFusedOutput = fusedOutput;
-            }
-            // --- END Slower Model Control Step ---
-
             if (converged) {
                 think("Consensus achieved! Dynamic threshold met or outputs converged.", 2);
             } else {
                 think("No consensus yet, continuing to next iteration...", 2);
             }
+
+            lastFusedOutput = fusedOutput;
+            currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
         }
 
         think("Consensus process completed", 1);
@@ -1344,7 +1312,6 @@ install_webdev_ai() {
     # Set default config values if not present
     local default_configs=(
         "code_repair_model:code:latest"
-        "slower_models:llama3:70b,mixtral:8x7b" # Default slower models
         "temperature:0.7"
         "top_p:0.9"
     )
@@ -1407,7 +1374,6 @@ run_webdev_task() {
     export VERBOSE_THINKING
     export SHOW_REASONING
     export OLLAMA_BIN # Ensure ollama path is passed
-    export SLOWER_MODELS=$(get_config slower_models || echo "llama3:70b,mixtral:8x7b") # Export slower models config
 
     local final_response
     # The Node.js orchestrator handles the full Triumvirate-style loop internally
@@ -1446,7 +1412,7 @@ run_webdev_task() {
 # --- MAIN CLI DISPATCHER ---
 main() {
     local start_time=$(date +%s)
-    log_event "DEBUG" "Script started: WebDev Code-Engine v8.3.0"
+    log_event "DEBUG" "Script started: WebDev Code-Engine v8.1.0"
 
     # Initial directory setup (covers essential directories as per new script)
     mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR" "$LOG_DIR"
@@ -1562,9 +1528,9 @@ main() {
 
 show_help() {
     cat << EOF
-${COLOR_GREEN}WebDev Code-Engine v8.3.0 - Unified Hybrid Agent${COLOR_RESET}
+${COLOR_GREEN}WebDev Code-Engine v8.1.0 - Unified Hybrid Agent${COLOR_RESET}
 
-${COLOR_CYAN}Description:${COLOR_RESET} Advanced AI agent system with hybrid execution (Node.js/Python), dynamic model selection, and comprehensive logging. Now with deterministic randomness and slower AI control for token streams. Error handling adjusted to prevent automatic script exits. Asynchronous concurrency for models is now fully functional.
+${COLOR_CYAN}Description:${COLOR_RESET} Advanced AI agent system with hybrid execution (Node.js/Python), dynamic model selection, and comprehensive logging.
 
 ${COLOR_CYAN}Usage:${COLOR_RESET}
   webdev-ai [OPTIONS] "<your prompt>"      - Run AI Task
@@ -1580,17 +1546,11 @@ ${COLOR_CYAN}Usage:${COLOR_RESET}
   webdev-ai --stop                         - Stop the current session
   webdev-ai --help                         - Show this help
 
-${COLOR_CYAN}Configuration Options (via --config set <key> <value>):${COLOR_RESET}
-  code_repair_model: The Ollama model to use for code repair (default: code:latest)
-  slower_models: Comma-separated list of Ollama models for review/control (default: llama3:70b,mixtral:8x7b)
-  temperature: AI model temperature (default: 0.7)
-  top_p: AI model top_p (default: 0.9)
-
 ${COLOR_CYAN}Examples:${COLOR_RESET}
   webdev-ai "Create a Python Flask API with a /status endpoint"
   webdev-ai repair ./src/broken_script.py
   webdev-ai --start my-new-app
-  webdev-ai --config set slower_models "llama3:70b,gemma:7b"
+  webdev-ai --config set code_repair_model llama3:8b
   webdev-ai --hash file ./src/main.js
 
 ${COLOR_CYAN}Log File:${COLOR_RESET} (Events logged to database: $AI_DATA_DB)

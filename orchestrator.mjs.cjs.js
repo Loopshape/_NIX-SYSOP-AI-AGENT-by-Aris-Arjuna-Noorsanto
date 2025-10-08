@@ -12,10 +12,12 @@ const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 const VERBOSE_THINKING = process.env.VERBOSE_THINKING !== 'false';
 const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 const AI_DATA_DB = process.env.AI_DATA_DB;
+const SLOWER_MODELS_ENV = process.env.SLOWER_MODELS || "llama3:70b,mixtral:8x7b"; // Default slower models
 
 // Enhanced Model Pool for Web Development (Default/Fallback)
 const WEB_DEV_MODELS = ["2244:latest", "core:latest", "loop:latest", "coin:latest", "code:latest"];
-const MODEL_WEIGHTS = { "2244:latest": 2, "core:latest": 2, "loop:latest": 1, "coin:latest": 1, "code:latest": 2 };
+const SLOWER_MODELS = SLOWER_MODELS_ENV.split(',');
+const SLOWER_MODEL_ACTIVATION_CHANCE = 0.3; // 30% chance to engage a slower model for review
 
 // Working color implementation using template literals
 const colors = {
@@ -95,6 +97,14 @@ const genRecursiveHash = (prompt) => {
     const hash5 = crypto.createHash('sha256').update(hash4 + hash3 + hash2 + hash1 + baseString).digest('hex').substring(16, 20);
 
     return `${hash1}.${hash2}.${hash3}.${hash4}.${hash5}.${circularIndex}`;
+};
+
+// --- NEW: Deterministic Random Integer from Hash ---
+const getDeterministicRandomInt = (seedString, min, max) => {
+    const hash = crypto.createHash('sha256').update(seedString).digest('hex');
+    // Take a portion of the hash and convert to integer
+    const intValue = parseInt(hash.substring(0, 8), 16); 
+    return min + (intValue % (max - min + 1));
 };
 
 // --- Dynamic Model Selection (Ported to Node.js) ---
@@ -417,14 +427,45 @@ User Task: `;
             // Proof Cycle with Dynamic Math Logic
             converged = this.proofTracker.proofCycle(initialConverged, bestFramework, convergenceReasoning);
             
+            // --- NEW: Slower Model Control Step ---
+            const randomChance = getDeterministicRandomInt(this.taskId + String(i), 0, 100);
+            if (SLOWER_MODELS.length > 0 && randomChance < (SLOWER_MODEL_ACTIVATION_CHANCE * 100)) {
+                think(`Deterministic random chance (${randomChance}%) triggered slower model review.`, 2);
+                const slowerModelIndex = getDeterministicRandomInt(this.taskId + String(i) + "slower", 0, SLOWER_MODELS.length - 1);
+                const selectedSlowerModel = SLOWER_MODELS[slowerModelIndex];
+                
+                const reviewPrompt = `Review and refine the following output based on the original task: "${this.initialPrompt}". Focus on accuracy, completeness, and best practices. Return ONLY the refined output.
+
+Output to review:
+\`\`\`
+${fusedOutput}
+\`\`\`
+
+Your refined output:`;
+                
+                think(`Engaging slower model (${selectedSlowerModel}) for review...`, 2);
+                const refinedOutput = await this.runOllama(selectedSlowerModel, reviewPrompt, bestFramework, i + 1 + "_review").catch(e => {
+                    console.error(colors.redText(`[SLOWER MODEL ERROR] ${e}`));
+                    return fusedOutput; // Fallback to original if slower model fails
+                });
+                
+                showReasoning(`Slower model (${selectedSlowerModel}) refined output.`, 'Slower Model Control');
+                currentPrompt = this.initialPrompt + `\n\nPrevious iteration (refined) output for improvement:\n${refinedOutput}`;
+                lastFusedOutput = refinedOutput; // Update lastFusedOutput with refined version
+            } else {
+                if (SLOWER_MODELS.length > 0) {
+                    think(`Slower model review skipped this iteration (chance: ${randomChance}%).`, 2);
+                }
+                currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
+                lastFusedOutput = fusedOutput;
+            }
+            // --- END Slower Model Control Step ---
+
             if (converged) {
                 think("Consensus achieved! Dynamic threshold met or outputs converged.", 2);
             } else {
                 think("No consensus yet, continuing to next iteration...", 2);
             }
-
-            lastFusedOutput = fusedOutput;
-            currentPrompt = this.initialPrompt + `\n\nPrevious iteration output for improvement:\n${fusedOutput}`;
         }
 
         think("Consensus process completed", 1);
