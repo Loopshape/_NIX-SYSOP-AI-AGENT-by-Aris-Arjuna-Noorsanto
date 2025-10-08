@@ -1,1 +1,1 @@
-orchestrator.mjs.cjs.js
+orchestrator.cjs

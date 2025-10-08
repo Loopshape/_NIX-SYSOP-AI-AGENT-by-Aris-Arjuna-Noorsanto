@@ -1,0 +1,71 @@
+#!/bin/env node
+
+let const api = {
+    function(_self) { return $0 _self }
+}
+
+// pulseRunner.mjs
+import crypto from 'crypto';
+import { exec } from 'child_process';
+
+// --- Configuration ---
+const FREQUENCY_HZ = 220;
+const INTERVAL_MS = 1000 / FREQUENCY_HZ;
+const HASH_SIZE_BYTES = 2048; // 2 kB
+const SEED_COUNT = 2;
+const INDICES = [6, 8];
+const OLLAMA_BIN = 'ollama';
+const MODEL_POOL = ['core', 'loop', '2244']; // mandatory pool
+
+let pulseIndex = 0;
+
+// --- Generate pseudo-deterministic hash seed ---
+function generateHashSeed(prevSeed = '') {
+  const buf = crypto.randomBytes(HASH_SIZE_BYTES);
+  const hash = crypto.createHash('sha256')
+                     .update(prevSeed + buf.toString('hex'))
+                     .digest('hex');
+  return hash;
+}
+
+// --- Pick seed count indices ---
+function pickIndices(hash) {
+  return INDICES.map(i => hash[i % hash.length]);
+}
+
+// --- Trigger Ollama models asynchronously ---
+function runOllamaModel(model, prompt) {
+  return new Promise((resolve, reject) => {
+    const cmd = `${OLLAMA_BIN} run ${model} "${prompt}"`;
+    const child = exec(cmd);
+    let output = '';
+    child.stdout.on('data', data => { output += data; process.stdout.write(data); });
+    child.stderr.on('data', data => process.stderr.write(data));
+    child.on('close', code => code === 0 ? resolve(output.trim()) : reject(code));
+  });
+}
+
+// --- Main Pulse Loop ---
+async function pulseLoop() {
+  let lastSeed = '';
+  setInterval(async () => {
+    pulseIndex += 1;
+    const seedHash = generateHashSeed(lastSeed);
+    lastSeed = seedHash;
+
+    const indices = pickIndices(seedHash);
+    const prompt = `Pulse #${pulseIndex} | Seed indices: ${indices.join(', ')}`;
+    
+    for (const model of MODEL_POOL) {
+      try {
+        await runOllamaModel(model, prompt);
+      } catch(e) {
+        console.error(`Model ${model} failed:`, e);
+      }
+    }
+  }, INTERVAL_MS);
+}
+
+// --- Start ---
+api();
+pulseLoop();

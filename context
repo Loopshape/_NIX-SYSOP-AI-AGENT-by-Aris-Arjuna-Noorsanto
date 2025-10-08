@@ -1,0 +1,94 @@
+#!/bin/env node
+import { exec } from "child_process";
+import util from "util";
+import fs from "fs";
+const execAsync = util.promisify(exec);
+
+// --- 2π Modulo Logic for dynamic thresholds ---
+function compute2PiLogic() {
+    const pi = Math.PI;
+    const n = pi;
+    const i = (12 * n) / 18;
+    const sixSquared = 6 ** 2;
+    const impossible = sixSquared === 0;
+
+    return {
+        n, i, sixSquared, impossible,
+        reasoning: [
+            `2π = 2n → n = ${n}`,
+            `12n = 18i → i = ${i}`,
+            `6² = 0 → ${sixSquared} == 0? ${impossible ? "❌ False" : "✅ True"}`
+        ]
+    };
+}
+
+// --- Run Ollama in background using nohup ---
+async function runOllamaBackground(model, prompt, logFile) {
+    const escapedPrompt = prompt.replace(/"/g, '\\"');
+    const command = `nohup ollama run ${model} "${escapedPrompt}" > ${logFile} 2>&1 & echo $!`;
+    try {
+        const { stdout } = await execAsync(command);
+        const pid = stdout.trim();
+        console.log(`Ollama model '${model}' running in background (PID: ${pid}) -> ${logFile}`);
+        return { model, pid, logFile };
+    } catch (err) {
+        console.error(`Failed to start Ollama for ${model}:`, err.message);
+        return null;
+    }
+}
+
+// --- Fuse multiple log files (simplified) ---
+function fuseOutputs(logFiles) {
+    let fused = "";
+    logFiles.forEach(file => {
+        if (fs.existsSync(file)) {
+            fused += fs.readFileSync(file, "utf8") + "\n";
+        }
+    });
+    return fused;
+}
+
+// --- Orchestrator for async 3D web dev task ---
+async function orchestrator(prompt) {
+    const { reasoning } = compute2PiLogic();
+    console.log("=== 2π Modulo Reasoning ===");
+    reasoning.forEach(line => console.log(line));
+
+    // Models to run (you can add or reorder)
+    const models = ["loop:latest", "core:latest", "2244:latest"];
+
+    // Launch all models asynchronously in background
+    const tasks = models.map(model => {
+        const logFile = `${model.replace(/[:]/g, "_")}_output.log`;
+        return runOllamaBackground(model, prompt, logFile);
+    });
+
+    const results = await Promise.all(tasks);
+    const activeLogs = results.filter(r => r !== null).map(r => r.logFile);
+
+    // Determine dynamic threshold based on 2π modulo
+    const circularIndex = Math.floor((Date.now() / 1000) % (2 * Math.PI));
+    const threshold = (circularIndex % models.length) + 1;
+    console.log(`\nCircular Index: ${circularIndex}, Threshold: ${threshold}`);
+    console.log(`Running models: ${results.length}, Threshold met? ${results.length >= threshold ? "✅ Yes" : "❌ No"}`);
+
+    // Fused output (optional)
+    const fusedOutput = fuseOutputs(activeLogs);
+    console.log("\n=== FUSED OUTPUT ===\n");
+    console.log(fusedOutput.substring(0, 500)); // Print first 500 chars for preview
+
+    return { results, fusedOutput };
+}
+
+// --- Example Usage ---
+(async () => {
+    const prompt = `
+Create a 3D interactive scene using jQuery + GSAP + Three.js:
+- Animations with GSAP timelines
+- Interactive 3D objects with Three.js
+- DOM integration with jQuery events
+- Responsive and performant
+`;
+    const result = await orchestrator(prompt);
+    console.log("\nBackground Ollama tasks started. Check log files for full outputs:", result.results.map(r => r.logFile));
+})();

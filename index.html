@@ -1,154 +1,140 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI-BITBOY-DEX :: STRATEGIC SYNTHESIS CORE</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="index.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
-    <script src="https://unpkg.com/@web3modal/standalone@3.1.0/dist/index.umd.js"></script>
-<script type="importmap">
-{
-  "imports": {
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.19.0"
-  }
-}
-</script>
+<meta charset="UTF-8">
+<title>Ollama Universe</title>
+<style>
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; color:#0f0; font-family:monospace;}
+  canvas { display:block; }
+  #log { position:absolute; top:0; left:0; padding:10px; max-height:200px; overflow:auto; background: rgba(0,0,0,0.5);}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.3/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r160/three.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header class="header">
-            <span>AI-BITBOY-DEX :: STRATEGIC SYNTHESIS CORE</span>
-            <div class="header-controls">
-                <div class="status-indicator">
-                    <div id="status-light" class="status-light"></div>
-                    <span id="ai-status-text">SYSTEM ONLINE</span>
-                </div>
-            </div>
-        </header>
 
-        <main class="main-content">
-            <!-- Top Row: Chart and Intel -->
-            <div id="market-chart-panel" class="panel">
-                <div class="panel-header">
-                    <h2 class="panel-title"><i class="fas fa-chart-bar"></i>MARKET ANALYSIS :: BTC/USD</h2>
-                    <div class="chart-controls">
-                         <div class="chart-toolbar">
-                             <button id="draw-trendline-btn" class="chart-tool-btn" aria-label="Draw Trendline" title="Draw Trendline"><i class="fas fa-pencil-ruler"></i></button>
-                             <button id="add-annotation-btn" class="chart-tool-btn" aria-label="Add Annotation" title="Add Annotation"><i class="fas fa-map-marker-alt"></i></button>
-                             <button id="clear-drawings-btn" class="chart-tool-btn" aria-label="Clear Drawings" title="Clear Drawings"><i class="fas fa-trash"></i></button>
-                        </div>
-                        <div class="timeframe-selector">
-                            <button class="timeframe-btn active" data-timeframe="1H">1H</button>
-                            <button class="timeframe-btn" data-timeframe="4H">4H</button>
-                            <button class="timeframe-btn" data-timeframe="1D">1D</button>
-                            <button id="reset-zoom-btn" class="timeframe-btn" aria-label="Reset Zoom" title="Reset Zoom"><i class="fas fa-search-minus"></i></button>
-                        </div>
-                    </div>
-                </div>
-                <div id="chart-container">
-                    <canvas id="marketChart"></canvas>
-                </div>
-            </div>
-            <div id="market-intel" class="panel">
-                <h2 class="panel-title"><i class="fas fa-satellite-dish"></i>MARKET INTEL</h2>
-                <div id="order-book-container">
-                    <!-- Order book will be injected here -->
-                </div>
-                <div class="intel-grid">
-                     <div class="data-point">
-                        <h3>24H Volume</h3>
-                        <p>$45.2B</p>
-                    </div>
-                     <div class="data-point">
-                        <h3>Dominance</h3>
-                        <p>BTC 51.7%</p>
-                    </div>
-                     <div class="data-point">
-                        <h3>Volatility</h3>
-                        <p class="negative">HIGH</p>
-                    </div>
-                     <div class="data-point">
-                        <h3>Sentiment</h3>
-                        <p class="positive">GREED</p>
-                    </div>
-                </div>
-                <h3 class="news-title">LATEST INTEL FEED</h3>
-                <div id="news-feed" class="news-feed">
-                    <!-- News items will be injected here -->
-                </div>
-            </div>
+<div id="log"></div>
 
-            <!-- Bottom Row: Controls, Directives, Logs, History -->
-            <div id="ai-synthesis" class="panel">
-                <h2 class="panel-title"><i class="fas fa-brain"></i>AI PERSONA &amp; CAPITAL</h2>
-                <div id="persona-selector" class="persona-selector">
-                    <!-- Personas will be injected here -->
-                </div>
-                <div class="ai-provider-container">
-                    <h3 class="form-label">AI PROVIDER</h3>
-                    <div id="provider-selector" class="provider-selector">
-                        <!-- AI Providers will be injected here -->
-                    </div>
-                    <div id="local-model-container" class="provider-input-group" style="display: none;">
-                        <label for="local-model-input">OLLAMA MODEL</label>
-                        <div class="input-with-button">
-                            <input type="text" id="local-model-input" class="override-input" placeholder="e.g., llama3">
-                            <button id="test-ollama-btn">Test</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="allocation-container">
-                    <label for="allocation-slider" class="form-label">ALLOCATION: <span id="allocation-value">50%</span></label>
-                    <input type="range" id="allocation-slider" min="0" max="100" value="50" class="form-range">
-                </div>
-                <div id="manual-overrides-container" class="manual-overrides-container">
-                    <h3 class="form-label">MANUAL OVERRIDES</h3>
-                    <div class="override-input-group">
-                        <label for="manual-tp-input">TAKE PROFIT</label>
-                        <input type="number" id="manual-tp-input" class="override-input" placeholder="e.g., 70000">
-                    </div>
-                    <div class="override-input-group">
-                        <label for="manual-sl-input">STOP LOSS</label>
-                        <input type="number" id="manual-sl-input" class="override-input" placeholder="e.g., 65000">
-                    </div>
-                </div>
-            </div>
-            <div id="directive-panel" class="panel">
-                <h2 class="panel-title"><i class="fas fa-file-alt"></i>TRADE DIRECTIVE</h2>
-                <div id="directive-output">
-                    <span class="placeholder">Select a persona and generate a directive...</span>
-                </div>
-                <div class="btn-group">
-                    <button id="generate-directive-btn" class="btn btn-buy">GENERATE DIRECTIVE</button>
-                </div>
-            </div>
-            <div id="ai-operations" class="panel">
-                <h2 class="panel-title"><i class="fas fa-cogs"></i>AI OPERATIONS LOG</h2>
-                <div id="ai-operations-container">
-                    <div id="ai-log" class="ai-log">
-                        <!-- Log entries will be injected here -->
-                    </div>
-                </div>
-            </div>
-            <div id="trade-history-panel" class="panel">
-                 <h2 class="panel-title"><i class="fas fa-history"></i>TRADE HISTORY</h2>
-                 <div id="trade-history" class="trade-history">
-                    <!-- Trade history will be injected here -->
-                 </div>
-            </div>
-        </main>
-    </div>
-    <div id="notification-container"></div>
-    <script type="module" src="index.tsx"></script>
+<script>
+$(function(){
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.z = 50;
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Lights
+  const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+  scene.add(ambient);
+
+  const pointLight = new THREE.PointLight(0xffffff, 1.2);
+  scene.add(pointLight);
+
+  // Verbose logging helper
+  function log(msg){
+    const logDiv = document.getElementById('log');
+    const entry = document.createElement('div');
+    entry.textContent = msg;
+    logDiv.appendChild(entry);
+    logDiv.scrollTop = logDiv.scrollHeight;
+    console.log(msg);
+  }
+
+  // Universe parameters
+  const NUM_ATOMS = 50;      // number of nuclei
+  const MAX_ELECTRONS = 4;   // max electrons per atom
+
+  const atoms = [];
+
+  // Initialize atoms
+  for(let i=0; i<NUM_ATOMS; i++){
+    const nucleusGeo = new THREE.SphereGeometry(1 + Math.random()*0.5, 16,16);
+    const nucleusMat = new THREE.MeshStandardMaterial({
+      color: Math.random()*0xffffff,
+      emissive: Math.random()*0xffffff
+    });
+    const nucleus = new THREE.Mesh(nucleusGeo, nucleusMat);
+
+    nucleus.position.set(
+      (Math.random()-0.5)*100,
+      (Math.random()-0.5)*50,
+      (Math.random()-0.5)*50
+    );
+
+    // electrons
+    const numElectrons = 1 + Math.floor(Math.random()*MAX_ELECTRONS);
+    const electrons = [];
+
+    for(let j=0;j<numElectrons;j++){
+      const eGeo = new THREE.SphereGeometry(0.2 + Math.random()*0.2, 8, 8);
+      const eMat = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xffffff});
+      const electron = new THREE.Mesh(eGeo, eMat);
+
+      electron.userData.radius = 2 + j*0.5 + Math.random();
+      electron.userData.angle = Math.random()*Math.PI*2;
+      electron.userData.speed = 0.01 + Math.random()*0.02;
+      electron.userData.nucleus = nucleus;
+
+      electrons.push(electron);
+      scene.add(electron);
+
+      // Electron pulse
+      (function(e){
+        gsap.to(e.scale, {
+          x: 0.2 + Math.random()*0.2,
+          y: 0.2 + Math.random()*0.2,
+          z: 0.2 + Math.random()*0.2,
+          duration: 0.5 + Math.random()*1,
+          ease:"sine.inOut",
+          onComplete: ()=>arguments.callee(e)
+        });
+      })(electron);
+
+      log(`Atom #${i} spawned electron #${j} with radius ${electron.userData.radius.toFixed(2)}`);
+    }
+
+    nucleus.userData.electrons = electrons;
+    atoms.push(nucleus);
+    scene.add(nucleus);
+
+    log(`Created atom #${i} at x:${nucleus.position.x.toFixed(1)}, y:${nucleus.position.y.toFixed(1)}, z:${nucleus.position.z.toFixed(1)} with ${numElectrons} electrons`);
+  }
+
+  // Responsive
+  $(window).on('resize', function(){
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // Animate electrons
+  function animateUniverse(){
+    atoms.forEach((atom, i) => {
+      atom.userData.electrons.forEach((e, j) => {
+        e.userData.angle += e.userData.speed;
+        e.position.x = atom.position.x + Math.cos(e.userData.angle) * e.userData.radius;
+        e.position.z = atom.position.z + Math.sin(e.userData.angle) * e.userData.radius;
+        e.position.y = atom.position.y + Math.sin(e.userData.angle*2) * 0.5;
+
+        // verbose log occasionally
+        if(Math.random()<0.001){
+          log(`Atom #${i} electron #${j} at x:${e.position.x.toFixed(1)}, y:${e.position.y.toFixed(1)}, z:${e.position.z.toFixed(1)}`);
+        }
+      });
+    });
+  }
+
+  function render(){
+    requestAnimationFrame(render);
+    animateUniverse();
+    renderer.render(scene, camera);
+  }
+
+  render();
+});
+</script>
 </body>
 </html>
-

@@ -1,0 +1,14 @@
+# file_0.sh (Example wrapper script to orchestrate the process)
+#!/bin/bash
+PROJECT_DIR="my-project-batch-rebase"
+mkdir -p "$PROJECT_DIR"
+cd "$PROJECT_DIR"
+
+echo "Running batch SOAP/REST rebase process..."
+
+# Use webdev-ai's internal regex file finder
+# Assuming the user wants to rebase all .xml and .json files
+# The orchestrator will pass these as --file arguments to the Python script
+webdev-ai --file ".*\.xml$" --file ".*\.json$" "Perform a 'rebase' operation on these files. For XML, convert specific elements to a new schema. For JSON, refactor specific object structures. Use Ollama for semantic transformation. Apply changes at the relevant data 'offset'." --project "$PROJECT_DIR"
+
+echo "Batch rebase process initiated. Check $PROJECT_DIR for results."

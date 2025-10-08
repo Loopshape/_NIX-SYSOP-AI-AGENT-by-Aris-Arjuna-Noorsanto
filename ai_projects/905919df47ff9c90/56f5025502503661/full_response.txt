@@ -1,0 +1,16 @@
+User Prompt: repair shell .ai
+Messenger: [0;35m🤖 messenger is thinking...[0m
+[0;36m=======================[0m
+[0;34mError: Failed to get AI response. Check if Ollama is running and model is available.[0m
+[0;36m=======================[0m
+Error: Failed to get AI response. Check if Ollama is running and model is available.
+Combinator: [0;35m🤖 combinator is thinking...[0m
+[0;36m=======================[0m
+[0;34mError: Failed to get AI response. Check if Ollama is running and model is available.[0m
+[0;36m=======================[0m
+Error: Failed to get AI response. Check if Ollama is running and model is available.
+Trader: [0;35m🤖 trader is thinking...[0m
+[0;36m=======================[0m
+[0;34mError: Failed to get AI response. Check if Ollama is running and model is available.[0m
+[0;36m=======================[0m
+Error: Failed to get AI response. Check if Ollama is running and model is available.

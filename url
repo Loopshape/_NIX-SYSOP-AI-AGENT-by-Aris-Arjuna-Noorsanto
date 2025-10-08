@@ -1,0 +1,8 @@
+#!/bin/env bash
+curl -X POST http://127.0.0.1:11434/v1/generate \
+     -H "Content-Type: application/json" \
+     -d '{
+           "prompt": .ai,
+           "temperature": 0.2,
+           "top_k": 0.87
+         }'

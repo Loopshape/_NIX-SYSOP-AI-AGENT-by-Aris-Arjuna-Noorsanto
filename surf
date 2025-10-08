@@ -1,0 +1,143 @@
+#!/bin/env python3
+import hashlib
+import re
+import os
+from pathlib import Path
+import requests
+import json
+
+class OllamaAgentPool:
+    def __init__(self, ollama_url="http://localhost:11434", log_file="ai_agent.log"):
+        self.pool = []            # Stores hashed entries
+        self.rehash_count = 0     # Counts skipped/invalid entries
+        self.ollama_url = ollama_url
+        self.log_file = log_file
+
+    # -------------------------------
+    # Input Sanitizer
+    # -------------------------------
+    def sanitize_input(self, text: str, max_length=500) -> str:
+        cleaned = re.sub(r"[;&|$`<>]", "", text)
+        return cleaned[:max_length]
+
+    # -------------------------------
+    # Sensitive Redaction
+    # -------------------------------
+    SENSITIVE_KEYWORDS = ["ip", "id", "password", "secret", "token"]
+
+    def redact_sensitive_info(self, text: str) -> str:
+        for word in self.SENSITIVE_KEYWORDS:
+            text = re.sub(rf"(?i){word}[:=]\S+", f"{word}=***", text)
+        return text
+
+    # -------------------------------
+    # Hashing
+    # -------------------------------
+    def hash_entry(self, entry: dict, ip_field="ip", id_field="id") -> str | None:
+        ip = entry.get(ip_field)
+        user_id = entry.get(id_field)
+        if not ip or not user_id:
+            self.rehash_count += 1
+            return None
+        to_hash = f"{ip}-{user_id}"
+        return hashlib.sha256(to_hash.encode()).hexdigest()
+
+    # -------------------------------
+    # Remap Nested Fields
+    # -------------------------------
+    def remap_fields(self, entry: dict, mapping: dict) -> dict:
+        remapped = {}
+        for src_path, target_field in mapping.items():
+            keys = src_path.split(".")
+            value = entry
+            try:
+                for key in keys:
+                    value = value[key]
+                if isinstance(value, str):
+                    value = self.sanitize_input(value)
+                remapped[target_field] = value
+            except (KeyError, TypeError):
+                remapped[target_field] = None
+        return remapped
+
+    # -------------------------------
+    # Add Entry to Pool
+    # -------------------------------
+    def add_entry(self, entry: dict):
+        hashed = self.hash_entry(entry)
+        if hashed:
+            self.pool.append(hashed)
+
+    # -------------------------------
+    # Filter Pool
+    # -------------------------------
+    def filter_pool(self):
+        self.pool = [h for h in self.pool if h]
+
+    # -------------------------------
+    # Ollama API Call
+    # -------------------------------
+    def call_ollama(self, model: str, prompt: str) -> dict:
+        prompt = self.sanitize_input(prompt)
+        url = f"{self.ollama_url}/v1/completions"
+        payload = {
+            "model": model,
+            "prompt": prompt
+        }
+        try:
+            resp = requests.post(url, json=payload, timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as e:
+            return {"error": str(e)}
+
+    # -------------------------------
+    # Log AI Output
+    # -------------------------------
+    def log_output(self, file_name: str, hashed_id: str, ai_response: dict):
+        safe_response = self.redact_sensitive_info(json.dumps(ai_response))
+        log_entry = f"{file_name} [{hashed_id}] -> {safe_response}\n"
+        with open(self.log_file, "a") as f:
+            f.write(log_entry)
+
+    # -------------------------------
+    # Status Report
+    # -------------------------------
+    def status(self):
+        return {
+            "pool_size": len(self.pool),
+            "rehash_count": self.rehash_count
+        }
+
+
+# -------------------------------
+# Full Sysop AI Integration
+# -------------------------------
+if __name__ == "__main__":
+    # Sample users
+    users = [
+        {"ip": "192.168.1.1", "id": "user1"},
+        {"ip": "10.0.0.5", "id": "user3"}
+    ]
+
+    agent_pool = OllamaAgentPool()
+
+    # Add users to hashed pool
+    for user in users:
+        agent_pool.add_entry(user)
+    agent_pool.filter_pool()
+
+    # Process /usr/bin commands safely
+    usr_bin_path = Path("/usr/bin")
+    for file in usr_bin_path.iterdir():
+        if file.is_file() and os.access(file, os.X_OK):
+            prompt = f"Analyze the command: {file.name}"
+            response = agent_pool.call_ollama(model="ollama-model-1", prompt=prompt)
+            hashed_id = agent_pool.pool[0] if agent_pool.pool else "unknown"
+
+            # Print and log safely
+            print(f"{file.name} [{hashed_id}] -> {response.get('completion', response)}")
+            agent_pool.log_output(file.name, hashed_id, response)
+
+    print("Final Pool:", agent_pool.pool)
+    print("Status:", agent_pool.status())
