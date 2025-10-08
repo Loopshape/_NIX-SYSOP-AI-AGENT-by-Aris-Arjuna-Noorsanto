@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
-# Version: 8.3.0 (Asynchronous Concurrency Fixes)
+# Version: 8.3.1 (Double Entropy: Google Ping RTT)
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -51,7 +51,7 @@ enhanced_status() {
     
     # Check if dependencies are available
     printf "\n${COLOR_BRIGHT}${COLOR_BLUE}🔧 DEPENDENCIES:${COLOR_RESET}\n"
-    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN" "pylint" "black" "autopep8" "shfmt")
+    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN" "pylint" "black" "autopep8" "shfmt" "ping" "curl")
     for dep in "${deps[@]}"; do
         if command -v "$dep" &> /dev/null; then
             printf "  ${COLOR_GREEN}✅ %s${COLOR_RESET}\n" "$dep"
@@ -242,7 +242,7 @@ check_dependencies() {
     thinking "Checking and installing system and Python dependencies..." 1
     
     # Check and install core system dependencies
-    local system_deps=("sqlite3" "node" "python3" "git")
+    local system_deps=("sqlite3" "node" "python3" "git" "ping" "curl")
     for dep in "${system_deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             log_event "ERROR" "Missing critical system dependency: $dep"
@@ -543,6 +543,46 @@ const getDeterministicRandomInt = (seedString, min, max) => {
     return min + (intValue % (max - min + 1));
 };
 
+// --- NEW: Get Google Ping Entropy ---
+const getGooglePingEntropy = async () => {
+    try {
+        think("Pinging google.com for external entropy...", 2);
+        // Use 'ping -c 1' for a single packet on Linux/macOS, '-n 1' on Windows
+        const command = process.platform === 'win32' ? 'ping -n 1 google.com' : 'ping -c 1 google.com';
+        const { stdout } = await new Promise((resolve, reject) => {
+            exec(command, (error, stdout, stderr) => {
+                if (error) {
+                    // Log error but don't reject, return 0 for graceful fallback
+                    console.error(colors.redText(`[PING ERROR] Failed to ping google.com: ${error.message}`));
+                    return resolve({ stdout: '', stderr: error.message });
+                }
+                resolve({ stdout, stderr });
+            });
+        });
+
+        // Extract average RTT (example for Linux/macOS, might need adjustment for Windows)
+        let rttMatch;
+        if (process.platform === 'win32') {
+            rttMatch = stdout.match(/Average = (\d+)ms/);
+        } else {
+            rttMatch = stdout.match(/rtt min\/avg\/max\/mdev = [0-9.]+\/([0-9.]+)/);
+        }
+        
+        if (rttMatch && rttMatch[1]) {
+            const avgRtt = parseFloat(rttMatch[1]);
+            think(`Google Ping RTT: ${avgRtt}ms`, 2);
+            return avgRtt;
+        } else {
+            think("Could not parse ping RTT from output.", 2);
+            return 0; // Default to 0 if parsing fails
+        }
+    } catch (e) {
+        console.error(colors.redText(`[PING EXCEPTION] ${e.message}`));
+        return 0; // Default to 0 on error
+    }
+};
+
+
 // --- Dynamic Model Selection (Ported to Node.js) ---
 const selectDynamicModels = (framework, complexity) => {
     return new Promise((resolve, reject) => {
@@ -655,12 +695,16 @@ class WebDevProofTracker {
         return Math.min(score, 10);
     }
 
-    crosslineEntropy(data) {
-        think("Analyzing output entropy...", 1);
+    async crosslineEntropy(data) { // Made async
+        think("Analyzing output entropy and incorporating external factors...", 1);
         const hash = crypto.createHash('sha256').update(data).digest('hex');
         this.entropyRatio += parseInt(hash.substring(0, 8), 16);
         
-        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}...)`, 'Entropy Analysis');
+        // Incorporate Google Ping RTT for external entropy
+        const pingRtt = await getGooglePingEntropy();
+        this.entropyRatio += pingRtt; // Add RTT to entropy ratio
+
+        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}..., ping: ${pingRtt}ms)`, 'Entropy Analysis');
     }
 
     proofCycle(converged, frameworkUsed = '', reasoning = '') {
@@ -854,7 +898,7 @@ User Task: `;
             }
 
             think(`Fusing ${validResults.length} valid outputs...`, 2);
-            this.proofTracker.crosslineEntropy(validResults.join(''));
+            await this.proofTracker.crosslineEntropy(validResults.join('')); // AWAIT here
             const fusedOutput = this.fuseWebOutputs(validResults);
             
             const convergenceReasoning = `Iteration ${i + 1}: ${fusedOutput === lastFusedOutput ? 'Outputs converged' : 'Outputs still diverging'}`;
@@ -1446,7 +1490,7 @@ run_webdev_task() {
 # --- MAIN CLI DISPATCHER ---
 main() {
     local start_time=$(date +%s)
-    log_event "DEBUG" "Script started: WebDev Code-Engine v8.3.0"
+    log_event "DEBUG" "Script started: WebDev Code-Engine v8.3.1"
 
     # Initial directory setup (covers essential directories as per new script)
     mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$DB_DIR" "$TEMPLATES_DIR" "$SCRIPTS_DIR" "$LOG_DIR"
@@ -1562,9 +1606,9 @@ main() {
 
 show_help() {
     cat << EOF
-${COLOR_GREEN}WebDev Code-Engine v8.3.0 - Unified Hybrid Agent${COLOR_RESET}
+${COLOR_GREEN}WebDev Code-Engine v8.3.1 - Unified Hybrid Agent${COLOR_RESET}
 
-${COLOR_CYAN}Description:${COLOR_RESET} Advanced AI agent system with hybrid execution (Node.js/Python), dynamic model selection, and comprehensive logging. Now with deterministic randomness and slower AI control for token streams. Error handling adjusted to prevent automatic script exits. Asynchronous concurrency for models is now fully functional.
+${COLOR_CYAN}Description:${COLOR_RESET} Advanced AI agent system with hybrid execution (Node.js/Python), dynamic model selection, and comprehensive logging. Now with deterministic randomness, slower AI control for token streams, and external "double entropy" from Google ping RTT. Error handling adjusted to prevent automatic script exits. Asynchronous concurrency for models is fully functional.
 
 ${COLOR_CYAN}Usage:${COLOR_RESET}
   webdev-ai [OPTIONS] "<your prompt>"      - Run AI Task

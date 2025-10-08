@@ -107,6 +107,46 @@ const getDeterministicRandomInt = (seedString, min, max) => {
     return min + (intValue % (max - min + 1));
 };
 
+// --- NEW: Get Google Ping Entropy ---
+const getGooglePingEntropy = async () => {
+    try {
+        think("Pinging google.com for external entropy...", 2);
+        // Use 'ping -c 1' for a single packet on Linux/macOS, '-n 1' on Windows
+        const command = process.platform === 'win32' ? 'ping -n 1 google.com' : 'ping -c 1 google.com';
+        const { stdout } = await new Promise((resolve, reject) => {
+            exec(command, (error, stdout, stderr) => {
+                if (error) {
+                    // Log error but don't reject, return 0 for graceful fallback
+                    console.error(colors.redText(`[PING ERROR] Failed to ping google.com: ${error.message}`));
+                    return resolve({ stdout: '', stderr: error.message });
+                }
+                resolve({ stdout, stderr });
+            });
+        });
+
+        // Extract average RTT (example for Linux/macOS, might need adjustment for Windows)
+        let rttMatch;
+        if (process.platform === 'win32') {
+            rttMatch = stdout.match(/Average = (\d+)ms/);
+        } else {
+            rttMatch = stdout.match(/rtt min\/avg\/max\/mdev = [0-9.]+\/([0-9.]+)/);
+        }
+        
+        if (rttMatch && rttMatch[1]) {
+            const avgRtt = parseFloat(rttMatch[1]);
+            think(`Google Ping RTT: ${avgRtt}ms`, 2);
+            return avgRtt;
+        } else {
+            think("Could not parse ping RTT from output.", 2);
+            return 0; // Default to 0 if parsing fails
+        }
+    } catch (e) {
+        console.error(colors.redText(`[PING EXCEPTION] ${e.message}`));
+        return 0; // Default to 0 on error
+    }
+};
+
+
 // --- Dynamic Model Selection (Ported to Node.js) ---
 const selectDynamicModels = (framework, complexity) => {
     return new Promise((resolve, reject) => {
@@ -219,12 +259,16 @@ class WebDevProofTracker {
         return Math.min(score, 10);
     }
 
-    crosslineEntropy(data) {
-        think("Analyzing output entropy...", 1);
+    async crosslineEntropy(data) { // Made async
+        think("Analyzing output entropy and incorporating external factors...", 1);
         const hash = crypto.createHash('sha256').update(data).digest('hex');
         this.entropyRatio += parseInt(hash.substring(0, 8), 16);
         
-        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}...)`, 'Entropy Analysis');
+        // Incorporate Google Ping RTT for external entropy
+        const pingRtt = await getGooglePingEntropy();
+        this.entropyRatio += pingRtt; // Add RTT to entropy ratio
+
+        showReasoning(`Entropy updated: ${this.entropyRatio} (hash: ${hash.substring(0, 16)}..., ping: ${pingRtt}ms)`, 'Entropy Analysis');
     }
 
     proofCycle(converged, frameworkUsed = '', reasoning = '') {
@@ -418,7 +462,7 @@ User Task: `;
             }
 
             think(`Fusing ${validResults.length} valid outputs...`, 2);
-            this.proofTracker.crosslineEntropy(validResults.join(''));
+            await this.proofTracker.crosslineEntropy(validResults.join('')); // AWAIT here
             const fusedOutput = this.fuseWebOutputs(validResults);
             
             const convergenceReasoning = `Iteration ${i + 1}: ${fusedOutput === lastFusedOutput ? 'Outputs converged' : 'Outputs still diverging'}`;
