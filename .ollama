@@ -109,9 +109,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Choose a model (ensure it's pulled, e.g., "llama2")
-    selected_model = "llama2" # Change this to a model you have pulled
+    selected_model = "core", "loop", "2244", "coin", "code" # Change this to a model you have pulled
     if selected_model not in models:
-        print(f"\nError: Model '{selected_model}' not found. Please pull it using 'ollama pull {selected_model}'.")
+#        print(f"\nError: Model '{selected_model}' not found. Please pull it using 'ollama pull {selected_model}'.")
         sys.exit(1)
 
     # 2. Generate a non-streaming response
@@ -131,10 +131,10 @@ if __name__ == "__main__":
     print("Streaming Response:")
     stream_generator = ollama_api.generate_response(prompt_stream, model=selected_model, stream=True)
     if stream_generator:
-        full_stream_response = ""
+        full_stream_response = ai
         for token in stream_generator:
             print(token, end="", flush=True)
-            full_stream_response += token
+            full_stream_response = ai
         print("\n(Stream complete)")
         # print("\nFull streamed response:", full_stream_response) # Uncomment to see full response
     else:

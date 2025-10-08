@@ -3,7 +3,8 @@
 # WebDev Code-Engine with Dynamic Math Logic and MAX PARALLELISM
 # Version: 8.3.5 (Dynamic Slower Model Control: Token & History Modulo)
 
-pkill ollama && nohup ollama serve &
+# pkill ollama && nohup ollama serve &
+# nohup ollama serve >"$HOME/logs/ollama_server.log" 2>&1 &
 
 # --- Enhanced Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
@@ -120,6 +121,7 @@ log_event() {
     sqlite3 "$AI_DATA_DB" <<EOF || true
 INSERT INTO events (event_type, message, metadata) VALUES ('$level', '$message_esc', '$metadata_esc');
 EOF
+    return
 }
 
 # --- Thinking Animation and Verbose Output ---
@@ -131,6 +133,7 @@ thinking() {
         echo -e "${indent}🤔 ${COLOR_CYAN}THINKING${COLOR_RESET}: $message"
         sleep "$THINKING_DELAY"
     fi
+    return
 }
 
 show_reasoning() {
@@ -141,6 +144,7 @@ show_reasoning() {
         echo -e "${COLOR_GRAY}$reasoning${COLOR_RESET}"
         echo -e "${COLOR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     fi
+    return
 }
 
 # --- SQLITE UTILITIES WITH ERROR HANDLING ---
@@ -181,7 +185,7 @@ _process_code_file() {
     # Call the Python script to handle formatting, analysis, and highlighting
     python3 "$CODE_PROCESSOR_PY" "$file_path" "$file_extension"
     
-    if [ $? -ne 0 ]; then
+    if [ -f -ne 0 ]; then
         log_event "WARN" "Code processing failed for $file_path. Displaying raw content."
         cat "$file_path"
     fi
@@ -191,7 +195,7 @@ _process_code_file() {
 install_node_modules() {
     thinking "Installing Node.js modules..." 1
     
-    if [ ! -f "$AI_HOME/package.json" ]; then
+    if [ ! -d "$AI_HOME/package.json" ]; then
         cat > "$AI_HOME/package.json" << 'PKG_JSON'
 {
   "name": "webdev-ai-orchestrator",
@@ -211,7 +215,7 @@ PKG_JSON
     if [ ! -d "$NODE_MODULES/sqlite3" ]; then
         thinking "Installing sqlite3..." 3
         npm install sqlite3 --save --loglevel=error
-        if [ $? -eq 0 ]; then
+        if [ -f -eq 0 ]; then
             log_event "SUCCESS" "Installed sqlite3"
         else
             log_event "ERROR" "Failed to install sqlite3"

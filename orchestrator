@@ -1,201 +1,257 @@
-#!/usr/bin/env bash
-set -euo pipefail
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Orchestration Simulator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom Keyframes for a smooth running pulse effect */
+        @keyframes runningPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); }
+            50% { box-shadow: 0 0 10px 5px rgba(37, 99, 235, 0.9); }
+        }
+        .task-running {
+            animation: runningPulse 1.5s infinite ease-in-out;
+            border-color: #2563EB !important; /* Blue 600 */
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'background-dark': '#1e293b', /* Slate 800 */
+                        'card-dark': '#334155', /* Slate 700 */
+                        'pending': '#94a3b8', /* Slate 400 */
+                        'running': '#2563EB', /* Blue 600 */
+                        'complete': '#10B981', /* Emerald 500 */
+                        'failed': '#EF4444', /* Red 500 */
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background-dark min-h-screen text-white font-sans p-4">
 
-# ================================
-# WebDev AI 8.1 Full Orchestrator
-# ================================
+    <!-- Main Application Container -->
+    <div id="app-container" class="max-w-4xl mx-auto py-8">
+        <h1 class="text-4xl font-extrabold text-center mb-2">
+            Orchestrator Sandbox
+        </h1>
+        <p class="text-center text-pending mb-8">
+            Visual simulation of a sequential task pipeline.
+        </p>
 
-AI_HOME="${AI_HOME:-$HOME/.webdev-ai}"
-SCRIPTS_DIR="$AI_HOME/scripts"
-DB_DIR="$AI_HOME/db"
-NODE_MODULES="$AI_HOME/node_modules"
-ORCHESTRATOR_FILE="$AI_HOME/orchestrator.mjs"
-CODE_PROCESSOR_PY="$SCRIPTS_DIR/code_processor.py"
-OLLAMA_BIN="${OLLAMA_BIN:-ollama}"
+        <!-- Control Panel -->
+        <div class="bg-card-dark p-4 sm:p-6 rounded-xl shadow-lg mb-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="text-lg font-medium text-white">
+                Status: <span id="orchestration-status" class="text-pending">IDLE</span>
+            </div>
+            <button id="start-button" onclick="startOrchestration()"
+                    class="w-full sm:w-auto px-6 py-3 bg-running text-white font-bold rounded-lg transition duration-200 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md">
+                Start Pipeline
+            </button>
+            <button id="reset-button" onclick="initializeTasks()" disabled
+                    class="w-full sm:w-auto px-6 py-3 bg-pending text-background-dark font-bold rounded-lg transition duration-200 hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-md">
+                Reset
+            </button>
+        </div>
 
-mkdir -p "$AI_HOME" "$SCRIPTS_DIR" "$DB_DIR"
+        <!-- Task Visualization -->
+        <div id="task-container" class="space-y-4">
+            <!-- Tasks will be rendered here by JavaScript -->
+        </div>
+    </div>
 
-# 1️⃣ System dependency check
-for dep in node python3 sqlite3 git; do
-    command -v $dep >/dev/null 2>&1 || { echo "$dep not found. Install it and rerun."; exit 1; }
-done
+    <script>
+        // Global variables
+        let tasks = [];
+        let isRunning = false;
+        const taskData = [
+            { id: 1, name: "Data Extraction (Source A)", successRate: 0.95, duration: 1500 },
+            { id: 2, name: "Data Transformation (ETL)", successRate: 0.85, duration: 2000 },
+            { id: 3, name: "Validate Schema & Integrity", successRate: 0.90, duration: 1000 },
+            { id: 4, name: "Model Training Start", successRate: 0.98, duration: 2500 },
+            { id: 5, name: "Deploy to Staging Environment", successRate: 0.70, duration: 3000 },
+            { id: 6, name: "Send Notification & Report", successRate: 1.00, duration: 1200 }
+        ];
 
-# 2️⃣ Python tools
-for tool in black autopep8 pylint shfmt pygments; do
-    if ! command -v $tool >/dev/null 2>&1; then
-        echo "Installing $tool..."
-        if [[ "$tool" == "shfmt" ]]; then
-            curl -sSLo /usr/local/bin/shfmt https://github.com/mvdan/sh/releases/latest/download/shfmt_linux_amd64
-            chmod +x /usr/local/bin/shfmt
-        elif [[ "$tool" == "pygments" ]]; then
-            pip3 install --user pygments
-        else
-            pip3 install --user "$tool"
-        fi
-    fi
-done
+        // Constants for Task States
+        const STATE = {
+            PENDING: 'PENDING',
+            RUNNING: 'RUNNING',
+            COMPLETE: 'COMPLETE',
+            FAILED: 'FAILED'
+        };
 
-# 3️⃣ Node modules
-if [ ! -f "$AI_HOME/package.json" ]; then
-    cat > "$AI_HOME/package.json" <<'EOF'
-{
-  "name": "webdev-ai-orchestrator",
-  "version": "1.0.0",
-  "type": "module",
-  "dependencies": { "sqlite3": "^5.1.6" }
-}
-EOF
-fi
-cd "$AI_HOME"
-npm install --loglevel=error
-cd - >/dev/null
+        // DOM elements
+        const taskContainer = document.getElementById('task-container');
+        const startButton = document.getElementById('start-button');
+        const resetButton = document.getElementById('reset-button');
+        const statusElement = document.getElementById('orchestration-status');
 
-# 4️⃣ Databases
-sqlite3 "$DB_DIR/ai_data.db" <<SQL
-CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, task_id TEXT, prompt TEXT, response TEXT, proof_state TEXT, framework TEXT, complexity INTEGER, reasoning_log TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, event_type TEXT, message TEXT, metadata TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS model_usage (task_id TEXT NOT NULL, model_name TEXT NOT NULL, PRIMARY KEY (task_id, model_name));
-SQL
+        /**
+         * Initializes the tasks array to the PENDING state and updates the UI.
+         */
+        function initializeTasks() {
+            console.log("Initializing tasks...");
+            isRunning = false;
+            tasks = taskData.map(data => ({
+                ...data,
+                state: STATE.PENDING
+            }));
+            renderTasks();
+            updateControls(STATE.PENDING);
+        }
 
-sqlite3 "$DB_DIR/web_config.db" <<SQL
-CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT UNIQUE, framework TEXT, port INTEGER, domain TEXT, status TEXT DEFAULT 'inactive', ts DATETIME DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS deployments (id INTEGER PRIMARY KEY, project_name TEXT, environment TEXT, status TEXT, url TEXT, logs TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS api_endpoints (id INTEGER PRIMARY KEY, project_name TEXT, method TEXT, path TEXT, handler TEXT, middleware TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);
-SQL
+        /**
+         * Renders the tasks list and their status in the DOM.
+         */
+        function renderTasks() {
+            taskContainer.innerHTML = ''; // Clear existing tasks
 
-# 5️⃣ Python code processor with formatting, analysis, and syntax highlighting
-cat > "$CODE_PROCESSOR_PY" <<'EOF'
-#!/usr/bin/env python3
-import sys, subprocess
-from pygments import highlight
-from pygments.lexers import guess_lexer
-from pygments.formatters import Terminal256Formatter
+            tasks.forEach((task, index) => {
+                // Determine color and icon based on state
+                let colorClass = '';
+                let icon = '';
+                let iconColor = '';
 
-file_path = sys.argv[1]
-try:
-    with open(file_path, 'r') as f:
-        code = f.read()
-except Exception as e:
-    print(f"[ERROR] Cannot read file: {e}", file=sys.stderr)
-    sys.exit(1)
+                switch (task.state) {
+                    case STATE.PENDING:
+                        colorClass = 'border-pending';
+                        icon = '⌛'; // Hourglass
+                        iconColor = 'text-pending';
+                        break;
+                    case STATE.RUNNING:
+                        colorClass = 'border-running task-running';
+                        icon = '⚙️'; // Gear
+                        iconColor = 'text-running';
+                        break;
+                    case STATE.COMPLETE:
+                        colorClass = 'border-complete';
+                        icon = '✅'; // Checkmark
+                        iconColor = 'text-complete';
+                        break;
+                    case STATE.FAILED:
+                        colorClass = 'border-failed';
+                        icon = '❌'; // X mark
+                        iconColor = 'text-failed';
+                        break;
+                }
 
-# Determine formatter
-ext = file_path.split('.')[-1]
-formatter_tools = []
-analyzer_tools = []
-if ext == "py":
-    formatter_tools=["black","autopep8"]; analyzer_tools=["pylint"]
-elif ext=="sh":
-    formatter_tools=["shfmt"]; analyzer_tools=[]
-elif ext in ["js","ts","jsx","tsx","css","html"]:
-    formatter_tools=[]; analyzer_tools=[]
-else:
-    formatter_tools=[]; analyzer_tools=[]
+                // Task HTML structure
+                const taskElement = document.createElement('div');
+                taskElement.className = `p-4 rounded-xl border-2 transition-all duration-500 shadow-xl ${colorClass} bg-card-dark flex items-center gap-4`;
+                taskElement.innerHTML = `
+                    <div class="text-3xl ${iconColor}">${icon}</div>
+                    <div class="flex-grow">
+                        <p class="text-lg font-bold">${task.name}</p>
+                        <p class="text-sm text-gray-400">Status: ${task.state}</p>
+                    </div>
+                    <!-- Connector Line (visually connects tasks, only if not the last one) -->
+                    ${index < tasks.length - 1 ? `
+                        <div class="absolute -bottom-8 left-6 w-0.5 h-8 bg-gray-500 transform -translate-x-1/2"></div>
+                    ` : ''}
+                `;
+                taskElement.style.position = 'relative';
 
-# Run formatting
-for tool in formatter_tools:
-    try:
-        proc = subprocess.run([tool, "-"], input=code.encode(), capture_output=True)
-        if proc.returncode==0 and proc.stdout:
-            code=proc.stdout.decode()
-    except: pass
+                // Add progress bar for Running state
+                if (task.state === STATE.RUNNING) {
+                    taskElement.innerHTML += `
+                        <div class="absolute bottom-0 left-0 h-1 bg-running rounded-bl-lg animate-pulse" style="width: 100%;"></div>
+                    `;
+                }
 
-# Run static analysis
-for tool in analyzer_tools:
-    try:
-        proc = subprocess.run([tool, file_path], capture_output=True)
-        if proc.stdout: print(proc.stdout.decode())
-    except: pass
+                taskContainer.appendChild(taskElement);
+            });
+        }
 
-# Syntax highlighting
-lexer = guess_lexer(code)
-formatter = Terminal256Formatter()
-print(highlight(code, lexer, formatter))
-EOF
-chmod +x "$CODE_PROCESSOR_PY"
+        /**
+         * Updates the control buttons and global status display.
+         * @param {string} finalState The state to set the orchestration to (e.g., STATE.COMPLETE).
+         */
+        function updateControls(finalState) {
+            startButton.disabled = isRunning || finalState === STATE.COMPLETE || finalState === STATE.FAILED;
+            resetButton.disabled = isRunning;
+            
+            statusElement.textContent = finalState;
+            statusElement.className = '';
+            
+            let statusClass = '';
+            if (finalState === STATE.RUNNING) statusClass = 'text-running';
+            else if (finalState === STATE.COMPLETE) statusClass = 'text-complete';
+            else if (finalState === STATE.FAILED) statusClass = 'text-failed';
+            else statusClass = 'text-pending';
 
-# 6️⃣ Node orchestrator with proof tracker, recursive consensus, and code processing
-cat > "$ORCHESTRATOR_FILE" <<'EOF'
-#!/usr/bin/env node
-import fs from 'fs';
-import path from 'path';
-import { exec } from 'child_process';
-import sqlite3 from 'sqlite3';
-import crypto from 'crypto';
-const AI_HOME = process.env.AI_HOME;
-const DB = path.join(AI_HOME,'db','ai_data.db');
-const OLLAMA_BIN = process.env.OLLAMA_BIN||'ollama';
-const CODE_PROC = path.join(AI_HOME,'scripts','code_processor.py');
-const WEB_DEV_MODELS=["2244:latest","core:latest","loop:latest","coin:latest","code:latest"];
-const prompt=process.argv.slice(2).join(' ');
-if(!prompt){console.error("Usage: node orchestrator.mjs \"Your prompt\"");process.exit(1);}
-const taskId=crypto.createHash('sha256').update(prompt).digest('hex').substring(0,16);
-const db=new sqlite3.Database(DB);
+            statusElement.classList.add(statusClass);
+        }
 
-// Proof Tracker
-class ProofTracker{
-  constructor(){this.cycle=0;this.net=0;this.entropy=0;this.chain=[];}
-  proofCycle(converged, reasoning){
-    this.cycle++; this.net += converged?1:-1;
-    const threshold=(new Date().getSeconds()%3)+1;
-    this.chain.push({cycle:this.cycle,converged,net:this.net,reasoning,timestamp:new Date().toISOString()});
-    return this.net>=threshold || converged;
-  }
-}
+        /**
+         * Core orchestration loop. Executes tasks sequentially.
+         */
+        async function startOrchestration() {
+            if (isRunning) return;
+            isRunning = true;
+            updateControls(STATE.RUNNING);
+            console.log("Orchestration started.");
 
-// Select models
-const selectDynamicModels=()=>Promise.resolve(WEB_DEV_MODELS.slice(0,3));
+            try {
+                for (let i = 0; i < tasks.length; i++) {
+                    const task = tasks[i];
+                    
+                    // 1. Set to RUNNING state
+                    task.state = STATE.RUNNING;
+                    renderTasks();
+                    console.log(`Task ${task.id} (${task.name}) is RUNNING...`);
 
-// Run Ollama
-const runOllama=(model,input,i)=>new Promise((resolve,reject)=>{
-  const cmd=`${OLLAMA_BIN} run ${model} "${input.replace(/"/g,'\\"')}"`;
-  exec(cmd,(err,stdout,stderr)=>err?reject(stderr):resolve(stdout));
-});
+                    // 2. Wait for simulated duration
+                    await new Promise(resolve => setTimeout(resolve, task.duration));
 
-// Fuse outputs
-const fuseOutputs=(outs)=>outs.sort((a,b)=>b.length-a.length)[0]||outs[0]||"";
+                    // 3. Determine success or failure
+                    const isSuccess = Math.random() < task.successRate;
 
-// Process code file
-const processCodeFile=(filePath)=>new Promise(res=>{
-  const py=CODE_PROC;
-  if(!fs.existsSync(filePath)){res("[ERROR] File not found"); return;}
-  exec(`python3 "${py}" "${filePath}"`,(err,stdout,stderr)=>res(stdout||stderr));
-});
+                    if (isSuccess) {
+                        task.state = STATE.COMPLETE;
+                        console.log(`Task ${task.id} (${task.name}) COMPLETE.`);
+                    } else {
+                        task.state = STATE.FAILED;
+                        console.error(`Task ${task.id} (${task.name}) FAILED.`);
+                        renderTasks();
+                        // Stop the entire pipeline on first failure
+                        updateControls(STATE.FAILED);
+                        isRunning = false;
+                        return; 
+                    }
+                    
+                    // 4. Update UI after state change
+                    renderTasks();
+                }
 
-(async()=>{
-  const tracker=new ProofTracker();
-  let currentPrompt=prompt, output="";
-  const modelPool=await selectDynamicModels();
-  for(let i=0;i<3;i++){
-    const results=await Promise.all(modelPool.map((m,j)=>runOllama(m,currentPrompt,i+1).catch(e=>e)));
-    const valid=results.filter(r=>typeof r==='string' && !r.startsWith('OLLAMA EXECUTION ERROR'));
-    if(valid.length===0){console.error("All models failed"); process.exit(1);}
-    output=fuseOutputs(valid);
-    if(tracker.proofCycle(i>0 && output,`Iteration ${i+1} fusion`)) break;
-    currentPrompt=prompt+"\nPrevious output:\n"+output;
-  }
-  console.log("\n=== FINAL OUTPUT ===\n",output);
+                // If loop completes, the orchestration is successful
+                updateControls(STATE.COMPLETE);
+                console.log("Orchestration COMPLETE.");
 
-  // Detect code blocks and process
-  const regex=/```(\w+)?\s*([\s\S]*?)```/g; let match;
-  while(match=regex.exec(output)){
-    const lang=match[1]||'txt';
-    const tmp=`${AI_HOME}/tmp.${lang}`;
-    fs.writeFileSync(tmp,match[2]);
-    console.log(`\n--- Processing code block ---\n`);
-    console.log(await processCodeFile(tmp));
-    fs.unlinkSync(tmp);
-  }
+            } catch (error) {
+                console.error("An unexpected error occurred during orchestration:", error);
+                updateControls(STATE.FAILED);
+            } finally {
+                isRunning = false;
+                // Re-enable start/reset buttons based on final state
+                startButton.disabled = true; 
+                resetButton.disabled = false;
+            }
+        }
 
-  console.log("\n=== REASONING CHAIN ===\n",tracker.chain);
-  db.close();
-})();
-EOF
-chmod +x "$ORCHESTRATOR_FILE"
+        // Initialize the app on load
+        window.onload = initializeTasks;
+    </script>
+</body>
+</html>
 
-# 7️⃣ Run orchestrator
-if [ $# -eq 0 ]; then
-    echo "Usage: $0 \"Your AI prompt here\""
-    exit 1
-fi
-node "$ORCHESTRATOR_FILE" "$*"
+
