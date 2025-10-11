@@ -1,0 +1,56 @@
+import networkx as nx
+
+# --- Dependency-aware multi-script execution ---
+def extract_dependencies(script: str) -> set:
+    """Extract pseudo-dependencies: exported vars, function definitions, files created."""
+    deps = set()
+    # Exported environment variables
+    for line in script.splitlines():
+        match = re.match(r'export (\w+)=', line)
+        if match:
+            deps.add(match.group(1))
+    # Functions (basic detection)
+    func_matches = re.findall(r'(\w+)\s*\(\)\s*{', script)
+    deps.update(func_matches)
+    return deps
+
+# Build dependency graph
+G = nx.DiGraph()
+script_info = []
+
+for idx, (score, script_content) in enumerate(best_scripts_ordered, start=1):
+    deps = extract_dependencies(script_content)
+    script_hash = hashlib.sha256(script_content.encode()).hexdigest()[:8]
+    script_info.append({
+        'id': idx,
+        'hash': script_hash,
+        'content': script_content,
+        'score': score,
+        'deps': deps
+    })
+    G.add_node(script_hash, content=script_content, score=score, deps=deps)
+
+# Link dependencies (very basic: if a script defines X and another uses X)
+for s1 in script_info:
+    for s2 in script_info:
+        if s1['hash'] == s2['hash']:
+            continue
+        # If s2 depends on something s1 defines, add an edge s1 -> s2
+        if s1['deps'] & s2['deps']:
+            G.add_edge(s1['hash'], s2['hash'])
+
+try:
+    execution_order = list(nx.topological_sort(G))
+except nx.NetworkXUnfeasible:
+    print_warning("Cyclic dependencies detected! Falling back to fractal score order.")
+    execution_order = [s['hash'] for s in sorted(script_info, key=lambda x: x['score'], reverse=True)]
+
+# Execute scripts in dependency-safe order
+for script_hash in execution_order:
+    script_node = G.nodes[script_hash]
+    temp_script_path = os.path.join(REPO, "tmp", f"ai_exec_{script_hash}.sh")
+    os.makedirs(os.path.dirname(temp_script_path), exist_ok=True)
+    
+    if safe_write_file(temp_script_path, script_node['content'].encode()):
+        print_info(f"Executing dependency-safe script: {temp_script_path} (Score: {script_node['score']:.4f})")
+        safe_execute_script(temp_script_path)
