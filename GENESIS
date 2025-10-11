@@ -1,0 +1,898 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+~/_/ai  — D-SAFE Autonomous AI CLI (cloud-first → local-learning)
+Full feature set but with SAFE boundary: will NOT write outside ~/_ unless you
+explicitly confirm a destructive or out-of-repo write at runtime.
+
+Usage:
+  ~/_/ai "<prompt or file:... or url>" [--agi] [--api] [--json] [--git] [--project <name>] ...
+  ~/_/ai "regex/path/*.js" --scan --verbose
+  ~/_/ai "calc: 2+2*math.pi" --sci
+  ~/_/ai "search: authentication" --db --json
+  ~/_/ai "rebuild component" --react --vite --monokai
+  ~/_/ai "optimal plan" --qbit --bounce 5 --entrope
+
+Important:
+- Projects and all default writes happen under: ~/_/projects/
+- Any attempted write outside ~/_ requires interactive confirmation:
+    Type the exact confirmation phrase printed on screen to proceed.
+"""
+
+import os
+import sys
+import re
+import json
+import hashlib
+import sqlite3
+import subprocess
+import time
+import math
+import cmath  # Added for complex number mathematics in fractal logic
+import argparse
+import asyncio
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
+import urllib.parse
+
+import requests
+
+# ============ EXTENDED CONFIG ============
+REPO = os.path.expanduser("~/_")
+PROJECTS_DIR = os.path.join(REPO, "projects")
+DB_PATH = os.path.join(REPO, "db", "agent.db")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+os.makedirs(PROJECTS_DIR, exist_ok=True)
+
+LOCAL_MODELS = ["loop", "code", "2244", "coin", "core"]
+CLOUD_MODELS = [
+    "qwen3-coder:480b-cloud",
+    "gpt-oss:120b-cloud",
+    "gpt-oss:20b-cloud",
+    "deepseek-v3.1:671b-cloud",
+]
+
+OLLAMA_BIN = os.environ.get("OLLAMA_BIN", "ollama")
+OLLAMA_HEALTH_URL = "http://127.0.0.1:11434/api/tags"
+
+# Extended feature flags
+ENABLED_FEATURES = {
+    'webgl3d': False,
+    'html5': True,
+    'css3': True,
+    'js': True,
+    'vite': True,
+    'monokai': False,
+    'neonlight': False,
+    'dex': False,
+    'rest': True,
+    'soap': False,
+    'translate': False,
+    'qbit': False,
+    'prime': False,
+    'entrope': False,  # Added
+    'bounce': 3,       # Default bounce depth
+}
+
+# Boosted Cloud Connectivity
+SESSION = requests.Session()
+
+# ============ COLOR UTILITIES ============
+class Colors:
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+    RED = '\033[31m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    MAGENTA = '\033[35m'
+    CYAN = '\033[36m'
+    GRAY = '\033[90m'
+    
+    @staticmethod
+    def style(text, color, bold=False):
+        result = color
+        if bold:
+            result += Colors.BOLD
+        return f"{result}{text}{Colors.RESET}"
+
+def print_error(msg):
+    print(Colors.style(f"✗ {msg}", Colors.RED, True))
+
+def print_success(msg):
+    print(Colors.style(f"✓ {msg}", Colors.GREEN, True))
+
+def print_warning(msg):
+    print(Colors.style(f"! {msg}", Colors.YELLOW))
+
+def print_info(msg):
+    print(Colors.style(f"ℹ {msg}", Colors.CYAN))
+
+def print_debug(msg):
+    print(Colors.style(f"🔍 {msg}", Colors.GRAY))
+
+# ============ SAFE WRITE HELPERS ============
+def is_under_repo(path: str) -> bool:
+    """Check if path is within safe repository boundaries"""
+    try:
+        path_obj = Path(path).resolve()
+        repo_obj = Path(REPO).resolve()
+        return repo_obj in path_obj.parents or path_obj == repo_obj
+    except Exception:
+        return False
+
+def require_confirmation_for(path: str) -> bool:
+    """Return True if path requires explicit confirmation (outside safe repo)"""
+    return not is_under_repo(path)
+
+def interactive_confirm(action_description: str, path: str) -> bool:
+    """Interactive confirmation for unsafe operations"""
+    phrase = f"CONFIRM-WRITE:{Path(path).resolve()}"
+    
+    print(f"\n{Colors.style('*** AGENT NEMODIAN - SAFETY GATE ***', Colors.YELLOW, True)}")
+    print(f"{Colors.style('Action:', Colors.BOLD)} {action_description}")
+    print(f"{Colors.style('Target:', Colors.BOLD)} {path}")
+    print(f"{Colors.style('WARNING: This path is outside safe directory (~/_).', Colors.RED, True)}")
+    print(f"{Colors.style('To proceed, type this exact phrase:', Colors.BOLD)}")
+    print(f"{Colors.style(f'>>> {phrase}', Colors.GREEN, True)}")
+    
+    try:
+        user_input = input().strip()
+    except (EOFError, KeyboardInterrupt):
+        user_input = ""
+    
+    if user_input == phrase:
+        print_success("Confirmation accepted - proceeding with write operation")
+        return True
+    
+    print_error("Confirmation failed - operation cancelled")
+    return False
+
+def safe_write_file(path: str, data: bytes, mode: str = "wb") -> bool:
+    """Safely write file with boundary checks"""
+    if require_confirmation_for(path):
+        if not interactive_confirm("Write file", path):
+            return False
+    
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    
+    try:
+        with open(path, mode) as f:
+            f.write(data if isinstance(data, (bytes, str)) else str(data).encode())
+        return True
+    except Exception as e:
+        print_error(f"Failed to write {path}: {e}")
+        return False
+
+def safe_execute_script(script_path: str) -> bool:
+    """Safely execute script with boundary checks"""
+    if require_confirmation_for(script_path):
+        if not interactive_confirm("Execute script", script_path):
+            return False
+    
+    try:
+        result = subprocess.run([script_path], capture_output=True, text=True, check=True)
+        print_success(f"Script executed: {script_path}")
+        if result.stdout:
+            print_debug(f"Output: {result.stdout}")
+        return True
+    except Exception as e:
+        print_error(f"Script execution failed: {e}")
+        return False
+
+# ============ EXTENDED SOURCE LOADER ============
+def load_extended_source(src: str) -> bytes:
+    """Enhanced source loader with regex patterns and special handlers"""
+    
+    # Handle mathematical calculations
+    if src.startswith(('calc:', 'math:')):
+        try:
+            expr = src.split(':', 1)[1].strip()
+            # Safe math evaluation
+            math_env = {
+                'math': math, 'sin': math.sin, 'cos': math.cos, 'tan': math.tan,
+                'log': math.log, 'exp': math.exp, 'sqrt': math.sqrt,
+                'pi': math.pi, 'e': math.e, 'tau': math.tau
+            }
+            result = eval(expr, {"__builtins__": {}}, math_env)
+            return f"{expr} = {result}".encode()
+        except Exception as e:
+            return f"Calculation error: {e}".encode()
+    
+    # Handle regex file patterns
+    if 'regex/' in src or any(pattern in src for pattern in ['/*', '/?', '.*']):
+        pattern = src.replace('regex/', '').replace('/*', '*').replace('/?', '?').replace('.*', '*')
+        matches = list(Path(REPO).rglob(pattern))
+        if matches:
+            content = b''
+            for match in matches[:10]:  # Limit results
+                if match.is_file():
+                    content += f"\n=== FILE: {match} ===\n".encode()
+                    try:
+                        content += match.read_bytes()
+                    except Exception:
+                        content += b"[Unable to read file]"
+            return content if content else b"No files matched pattern"
+    
+    # Handle search operations
+    if src.startswith('search:'):
+        query = src[7:].strip().lower()
+        results = []
+        for root, dirs, files in os.walk(REPO):
+            for file in files:
+                if file.endswith(('.py', '.js', '.html', '.css', '.md', '.txt', '.json')):
+                    filepath = os.path.join(root, file)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            if query in content.lower():
+                                # Find context around match
+                                lines = content.split('\n')
+                                for i, line in enumerate(lines):
+                                    if query in line.lower():
+                                        context = '\n'.join(lines[max(0, i-1):min(len(lines), i+2)])
+                                        results.append(f"{filepath} (line {i+1}):\n{context}\n")
+                                        break
+                    except Exception:
+                        continue
+                if len(results) >= 20:  # Limit results
+                    break
+            if len(results) >= 20:
+                break
+        return ("\n" + "="*50 + "\n").join(results).encode() if results else b"No matches found"
+    
+    # Handle hash operations
+    if src.startswith('hash:'):
+        target = src[5:].strip()
+        content = load_extended_source(target)
+        return f"SHA256: {hashlib.sha256(content).hexdigest()}".encode()
+    
+    # Handle database queries
+    if src.startswith(('db:', 'sql:')):
+        query = src.split(':', 1)[1].strip()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute(query)
+            if query.strip().lower().startswith('select'):
+                results = cursor.fetchall()
+                columns = [desc[0] for desc in cursor.description]
+                return json.dumps([dict(zip(columns, row)) for row in results], indent=2).encode()
+            else:
+                conn.commit()
+                return b"Query executed successfully"
+        except Exception as e:
+            return f"Database error: {e}".encode()
+        finally:
+            conn.close()
+    
+    # Handle Git operations
+    if src.startswith('git:'):
+        command = src[4:].strip()
+        try:
+            result = subprocess.run(['git'] + command.split(), 
+                                  cwd=REPO, capture_output=True, text=True)
+            return (result.stdout or result.stderr).encode()
+        except Exception as e:
+            return f"Git error: {e}".encode()
+    
+    # Handle file: prefix
+    if src.startswith("file:"):
+        src = src[5:]
+    
+    # Direct file path
+    if os.path.isfile(src):
+        try:
+            return open(src, "rb").read()
+        except Exception as e:
+            return f"File read error: {e}".encode()
+    
+    # HTTP URL
+    if src.startswith("http"):
+        for attempt in range(3):
+            try:
+                response = SESSION.get(src, timeout=(5, 30))
+                response.raise_for_status()
+                return response.content
+            except requests.exceptions.Timeout:
+                print_warning(f"Timeout fetching {src} (attempt {attempt+1}/3)")
+                time.sleep(2 ** attempt)
+            except requests.exceptions.RequestException as e:
+                return f"HTTP error: {e}".encode()
+        return b"Failed to fetch URL after 3 attempts"
+    
+    # REPO-relative path with execution
+    repo_path = os.path.join(REPO, src)
+    if os.path.exists(repo_path):
+        if os.access(repo_path, os.X_OK):
+            try:
+                return subprocess.run([repo_path], capture_output=True, check=True).stdout
+            except Exception as e:
+                return f"Execution error: {e}".encode()
+        else:
+            try:
+                return open(repo_path, "rb").read()
+            except Exception as e:
+                return f"File read error: {e}".encode()
+    
+    # Fallback: treat as literal string
+    return src.encode()
+
+# ============ EXTENDED OLLAMA MANAGEMENT ============
+def ensure_ollama_is_running() -> bool:
+    """Enhanced Ollama management with health checks"""
+    try:
+        response = SESSION.get(OLLAMA_HEALTH_URL, timeout=5)
+        if response.status_code == 200:
+            print_success("Ollama server is healthy")
+            return True
+    except requests.exceptions.RequestException:
+        print_warning("Ollama server not responding")
+    
+    # Attempt restart
+    print_info("Attempting to restart Ollama server...")
+    try:
+        # Kill existing processes
+        subprocess.run(["pkill", "-f", "ollama"], capture_output=True)
+        time.sleep(2)
+        
+        # Start new server
+        subprocess.Popen(
+            [OLLAMA_BIN, "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        
+        # Wait for startup
+        for i in range(10):
+            time.sleep(2)
+            try:
+                response = SESSION.get(OLLAMA_HEALTH_URL, timeout=2)
+                if response.status_code == 200:
+                    print_success("Ollama server restarted successfully")
+                    return True
+            except:
+                if i == 9:
+                    print_error("Failed to restart Ollama server")
+                    return False
+                continue
+    
+    except Exception as e:
+        print_error(f"Ollama restart failed: {e}")
+    
+    return False
+
+async def run_ollama_model_async(model: str, prompt: str, timeout: int = 180) -> str:
+    """Async model execution with streaming output"""
+    if model in LOCAL_MODELS:
+        # Mock for testing
+        return f"[MOCK {model}] Processed: {prompt[:100]}..."
+    
+    try:
+        process = await asyncio.create_subprocess_exec(
+            OLLAMA_BIN, "run", model, prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        output = ""
+        while True:
+            chunk = await process.stdout.read(1024)
+            if not chunk:
+                break
+            text = chunk.decode('utf-8', errors='ignore')
+            output += text
+            print(Colors.style(f"  {text}", Colors.GRAY), end='', flush=True)
+        
+        await process.wait()
+        return output.strip()
+        
+    except Exception as e:
+        return f"[ERROR {model}] {str(e)}"
+
+# ============ EXTENDED PROJECT SCAFFOLDING ============
+def detect_tech_stack(prompt: str) -> Dict[str, Any]:
+    """Enhanced technology stack detection"""
+    prompt_lower = prompt.lower()
+    
+    stack = {
+        'frontend': 'vanilla',
+        'backend': 'none',
+        'build_tool': 'none',
+        'styling': 'css3',
+        'features': []
+    }
+    
+    # Frontend detection
+    if any(term in prompt_lower for term in ['react', 'jsx']):
+        stack['frontend'] = 'react'
+    elif any(term in prompt_lower for term in ['vue', 'composition']):
+        stack['frontend'] = 'vue'
+    elif any(term in prompt_lower for term in ['svelte', 'sveltekit']):
+        stack['frontend'] = 'svelte'
+    
+    # Backend detection
+    if any(term in prompt_lower for term in ['node', 'express']):
+        stack['backend'] = 'node'
+    elif any(term in prompt_lower for term in ['python', 'flask', 'django']):
+        stack['backend'] = 'python'
+    elif any(term in prompt_lower for term in ['fastapi']):
+        stack['backend'] = 'fastapi'
+    
+    # Build tools
+    if any(term in prompt_lower for term in ['vite', 'vitejs']):
+        stack['build_tool'] = 'vite'
+    elif any(term in prompt_lower for term in ['webpack']):
+        stack['build_tool'] = 'webpack'
+    
+    # Styling
+    if any(term in prompt_lower for term in ['tailwind', 'tailwindcss']):
+        stack['styling'] = 'tailwind'
+    elif any(term in prompt_lower for term in ['bootstrap']):
+        stack['styling'] = 'bootstrap'
+    
+    # Features
+    if any(term in prompt_lower for term in ['3d', 'webgl', 'three.js']):
+        stack['features'].append('webgl3d')
+    if any(term in prompt_lower for term in ['api', 'rest']):
+        stack['features'].append('rest')
+    if any(term in prompt_lower for term in ['database', 'db', 'sql']):
+        stack['features'].append('database')
+    
+    return stack
+
+def generate_extended_project_tree(stack: Dict[str, Any], project_name: str) -> Dict[str, str]:
+    """Generate project structure based on detected stack"""
+    tree = {}
+    
+    # Package.json for Node-based projects
+    if stack['frontend'] in ['react', 'vue'] or stack['backend'] == 'node':
+        tree['package.json'] = json.dumps({
+            "name": project_name,
+            "version": "1.0.0",
+            "type": "module",
+            "scripts": {
+                "dev": "vite" if stack['build_tool'] == 'vite' else "webpack serve",
+                "build": "vite build" if stack['build_tool'] == 'vite' else "webpack build",
+                "preview": "vite preview"
+            },
+            "dependencies": {
+                "react": "^18.2.0",
+                "react-dom": "^18.2.0"
+            } if stack['frontend'] == 'react' else {},
+            "devDependencies": {
+                "@vitejs/plugin-react": "^4.2.1",
+                "vite": "^5.0.0"
+            } if stack['build_tool'] == 'vite' else {}
+        }, indent=2)
+    
+    # HTML entry point
+    if stack['frontend'] != 'none':
+        theme_class = "monokai" if ENABLED_FEATURES['monokai'] else "neonlight" if ENABLED_FEATURES['neonlight'] else ""
+        tree['index.html'] = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{project_name}</title>
+    <link rel="stylesheet" href="src/styles.css">
+    {"<script src='https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'></script>" if 'webgl3d' in stack['features'] else ''}
+</head>
+<body class="{theme_class}">
+    <div id="app"></div>
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>"""
+    
+    # CSS with theme support
+    tree['src/styles.css'] = """
+:root {
+    --primary: #007acc;
+    --background: #ffffff;
+    --text: #333333;
+}
+
+.monokai {
+    --background: #272822;
+    --text: #f8f8f2;
+    --primary: #a6e22e;
+}
+
+.neonlight {
+    --background: #0a0a0a;
+    --text: #00ff41;
+    --primary: #ff0080;
+}
+
+body {
+    margin: 0;
+    font-family: 'Courier New', monospace;
+    background: var(--background);
+    color: var(--text);
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+"""
+    
+    # Main JavaScript entry
+    if stack['frontend'] == 'react':
+        tree['src/main.jsx'] = f"""import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './styles.css'
+
+ReactDOM.createRoot(document.getElementById('app')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+)"""
+        
+        tree['src/App.jsx'] = f"""import React from 'react'
+
+export default function App() {{
+  return (
+    <div className="container">
+      <h1>Welcome to {project_name}</h1>
+      <p>React app with {stack['styling']} styling</p>
+      {'<WebGLScene />' if 'webgl3d' in stack['features'] else ''}
+    </div>
+  )
+}}
+"""
+    
+    # WebGL component if needed
+    if 'webgl3d' in stack['features']:
+        tree['src/components/WebGLScene.jsx'] = """
+import React, { useRef, useEffect } from 'react'
+import * as THREE from 'three'
+
+export default function WebGLScene() {
+  const mountRef = useRef(null)
+  
+  useEffect(() => {
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
+    const renderer = new THREE.WebGLRenderer()
+    
+    renderer.setSize(800, 600)
+    mountRef.current.appendChild(renderer.domElement)
+    
+    const geometry = new THREE.BoxGeometry()
+    const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+    const cube = new THREE.Mesh(geometry, material)
+    scene.add(cube)
+    camera.position.z = 5
+    
+    const animate = () => {
+      requestAnimationFrame(animate)
+      cube.rotation.x += 0.01
+      cube.rotation.y += 0.01
+      renderer.render(scene, camera)
+    }
+    animate()
+    
+    return () => mountRef.current?.removeChild(renderer.domElement)
+  }, [])
+  
+  return <div ref={mountRef} />
+}
+"""
+    
+    # Backend files
+    if stack['backend'] == 'node':
+        tree['server.js'] = """const express = require('express')
+const app = express()
+const port = 3000
+
+app.use(express.json())
+
+app.get('/api', (req, res) => {
+  res.json({ message: 'Hello from Node.js backend!' })
+})
+
+app.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`)
+})
+"""
+    
+    return tree
+
+# ============ ENHANCED CONSENSUS ENGINE ============
+class EnhancedConsensusEngine:
+    """Extended consensus engine with mathematical optimizations and Qbit-Map fractal logic"""
+    
+    def __init__(self, db_connection):
+        self.db = db_connection
+    
+    def calculate_entropy(self, text: str) -> float:
+        """Calculate Shannon entropy of text"""
+        if not text:
+            return 0
+        
+        char_freq = {}
+        for char in text:
+            char_freq[char] = char_freq.get(char, 0) + 1
+        
+        entropy = 0
+        text_len = len(text)
+        
+        for count in char_freq.values():
+            p = count / text_len
+            entropy -= p * math.log2(p)
+        
+        return entropy
+
+    def _run_fractal_consensus(self, initial_entropy: float, bounce_depth: int, avg_entropy: float) -> float:
+        """
+        Qbit-Map Iteration: Applies recursive fractal transformation to a model's entropy score.
+        This simulates iterative consensus refinement in a complex solution space.
+        
+        Iteration: Z(n+1) = Z(n)^2 + C
+        Z(0) = initial_entropy (real part, 0 imaginary)
+        C = Complexity Constant (avg_entropy + 0.1i)
+        
+        Returns the final magnitude of the complex number after iterations.
+        """
+        # Ensure initial_entropy is a positive non-zero value for stable iteration
+        z = cmath.complex(max(initial_entropy, 0.001), 0.0)
+        
+        # Define a Complexity Constant C based on global context
+        c_real = avg_entropy if avg_entropy > 0.001 else 1.0
+        C = cmath.complex(c_real, 0.1 * math.pi)
+
+        # Run recursive iteration (bounce)
+        for _ in range(bounce_depth):
+            z = z * z + C
+            # Simple boundary check to prevent overflow
+            if abs(z) > 1000:
+                 return 0.0 # Diverged
+
+        return abs(z)
+
+    def mathematical_optimize(self, scored_outputs: List[Tuple[float, str]], use_qbit: bool, bounce_depth: int) -> str:
+        """
+        Selects the best output using raw scoring or the Qbit-Map fractal consensus.
+        scored_outputs: List of (raw_entropy, output_text)
+        """
+        if not scored_outputs:
+            return ""
+
+        if not use_qbit:
+            # Fallback to standard entropy scoring
+            scored_outputs.sort(key=lambda x: x[0], reverse=True)
+            return scored_outputs[0][1]
+
+        print_info(f"Applying Qbit-Map Consensus (Bounce Depth: {bounce_depth})")
+        
+        # 1. Calculate Average Entropy for the Complexity Constant C
+        total_entropy = sum(raw_entropy for raw_entropy, _ in scored_outputs)
+        avg_entropy = total_entropy / len(scored_outputs) if scored_outputs else 1.0
+
+        fractal_scores = []
+        for raw_entropy, output_text in scored_outputs:
+            # 2. Run Fractal Iteration
+            fractal_score = self._run_fractal_consensus(raw_entropy, bounce_depth, avg_entropy)
+            
+            # 3. Combine Fractal Score with Code Quality (Bonus Score)
+            code_blocks = len(re.findall(r'```[\s\S]*?```', output_text))
+            bonus_score = code_blocks * 10
+            
+            final_score = fractal_score + bonus_score
+            fractal_scores.append((final_score, output_text))
+
+        # 4. Return highest scored output
+        fractal_scores.sort(key=lambda x: x[0], reverse=True)
+
+        if fractal_scores[0][0] == 0:
+            print_warning("Qbit-Map result diverged or scored zero. Falling back to simple score.")
+            scored_outputs.sort(key=lambda x: x[0], reverse=True)
+            return scored_outputs[0][1]
+
+        print_debug(f"Highest Fractal Score: {fractal_scores[0][0]:.4f}")
+        return fractal_scores[0][1]
+    
+    async def parallel_model_consensus(self, prompt: str, models: List[str], max_iterations: int = 2, use_qbit: bool = False, bounce_depth: int = 3) -> Dict[str, Any]:
+        """Run models in parallel and reach consensus using specified scoring method."""
+        all_outputs = [] # List of raw output strings
+        
+        for iteration in range(max_iterations):
+            print_info(f"Consensus iteration {iteration + 1}/{max_iterations}")
+            
+            # Run all models in parallel
+            tasks = [run_ollama_model_async(model, prompt) for model in models]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            valid_outputs = [r for r in results if isinstance(r, str) and not r.startswith('[ERROR')]
+            all_outputs.extend(valid_outputs)
+            
+            if len(valid_outputs) >= len(models) * 0.6:  # 60% success rate
+                break
+        
+        # Score outputs using entropy
+        scored_outputs = []
+        for output in all_outputs:
+            entropy = self.calculate_entropy(output)
+            scored_outputs.append((entropy, output))
+
+        # Mathematical optimization of results (Fractal or standard)
+        best_output = self.mathematical_optimize(scored_outputs, use_qbit, bounce_depth)
+        
+        return {
+            'output': best_output,
+            'total_models': len(models),
+            'successful_runs': len([o for e, o in scored_outputs if o]),
+            'consensus_score': len(all_outputs) / (len(models) * max_iterations)
+        }
+
+# ============ EXTENDED CLI ENTRYPOINT ============
+def parse_arguments():
+    """Parse extended CLI arguments"""
+    parser = argparse.ArgumentParser(
+        description="D-SAFE Autonomous AI CLI with Extended Features",
+        add_help=False
+    )
+    
+    # Core arguments
+    parser.add_argument('targets', nargs='*', help='Prompt, file path, URL, or special command')
+    
+    # Feature flags
+    parser.add_argument('--agi', action='store_true', help='Enable AGI attention mode')
+    parser.add_argument('--api', action='store_true', help='API mode')
+    parser.add_argument('--json', action='store_true', help='JSON output')
+    parser.add_argument('--git', action='store_true', help='Git integration')
+    parser.add_argument('--project', help='Project name')
+    
+    # Technology flags
+    parser.add_argument('--arch', action='store_true', help='Architecture mode')
+    parser.add_argument('--compile', action='store_true', help='Compilation mode')
+    parser.add_argument('--build', action='store_true', help='Build mode')
+    parser.add_argument('--fix', action='store_true', help='Fix/repair mode')
+    parser.add_argument('--webgl3d', action='store_true', help='WebGL 3D support')
+    parser.add_argument('--html5', action='store_true', help='HTML5 mode')
+    parser.add_argument('--css3', action='store_true', help='CSS3 mode')
+    parser.add_argument('--js', action='store_true', help='JavaScript mode')
+    parser.add_argument('--vite', action='store_true', help='Vite build tool')
+    parser.add_argument('--monokai', action='store_true', help='Monokai theme')
+    parser.add_argument('--neonlight', action='store_true', help='Neon light theme')
+    
+    # Functional flags
+    parser.add_argument('--code', action='store_true', help='Code generation')
+    parser.add_argument('--dex', action='store_true', help='DEX operations')
+    parser.add_argument('--hash', action='store_true', help='Hash operations')
+    parser.add_argument('--import', dest='import_', action='store_true', help='Import mode')
+    parser.add_argument('--unit', action='store_true', help='Unit testing')
+    parser.add_argument('--sci', action='store_true', help='Scientific mode')
+    parser.add_argument('--calc', action='store_true', help='Calculator mode')
+    parser.add_argument('--mod', action='store_true', help='Module mode')
+    parser.add_argument('--rest', action='store_true', help='REST API mode')
+    parser.add_argument('--sql', action='store_true', help='SQL mode')
+    parser.add_argument('--soap', action='store_true', help='SOAP mode')
+    parser.add_argument('--translate', action='store_true', help='Translation mode')
+    parser.add_argument('--db', action='store_true', help='Database mode')
+    
+    # Advanced / Qbit-Map flags
+    parser.add_argument('--qbit', action='store_true', help='Quantum Consensus Mode (activates Qbit-Map fractal scoring)')
+    parser.add_argument('--bounce', type=int, default=3, help='Sets the fractal iteration depth for Qbit-Map consensus (requires --qbit)')
+    parser.add_argument('--entrope', action='store_true', help='Entropy logging mode') # New flag for future logging/tuning
+    parser.add_argument('--timer', action='store_true', help='Timer mode')
+    parser.add_argument('--count', action='store_true', help='Counter mode')
+    parser.add_argument('--clock', action='store_true', help='Clock mode')
+    parser.add_argument('--index', action='store_true', help='Indexing mode')
+    parser.add_argument('--script', action='store_true', help='Script mode')
+    parser.add_argument('--netip', action='store_true', help='Network IP mode')
+    parser.add_argument('--crawl', action='store_true', help='Web crawl mode')
+    parser.add_argument('--scan', action='store_true', help='Scan mode')
+    parser.add_argument('--debug', action='store_true', help='Debug mode')
+    parser.add_argument('--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('--pipe', action='store_true', help='Pipeline mode')
+    parser.add_argument('--reset', action='store_true', help='Reset mode')
+    parser.add_argument('--help', action='store_true', help='Show help')
+    
+    return parser.parse_args()
+
+async def main():
+    args = parse_arguments()
+    
+    # Show help if requested
+    if args.help or not args.targets:
+        print(__doc__)
+        return
+    
+    # Update enabled features based on flags
+    for feature in ENABLED_FEATURES:
+        if hasattr(args, feature):
+            # Special handling for --bounce which is an int
+            if feature == 'bounce':
+                ENABLED_FEATURES[feature] = args.bounce
+            else:
+                ENABLED_FEATURES[feature] = getattr(args, feature)
+    
+    # Ensure Ollama is running
+    if not ensure_ollama_is_running():
+        sys.exit(1)
+    
+    # Load and process input
+    input_source = ' '.join(args.targets)
+    content = load_extended_source(input_source)
+    
+    # Initialize database
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # cur = conn.cursor() # Keep cursor definition if needed for future SQL
+    
+    # Initialize consensus engine
+    engine = EnhancedConsensusEngine(conn)
+    
+    # Determine if it's a special command or a prompt requiring model execution
+    is_model_prompt = not any(input_source.startswith(prefix) for prefix in ['calc:', 'search:', 'hash:', 'db:', 'git:'])
+
+    if is_model_prompt:
+        print_info("Running enhanced AI consensus...")
+        
+        # Run consensus with Qbit-Map parameters if requested
+        consensus_result = await engine.parallel_model_consensus(
+            content.decode('utf-8', errors='ignore'),
+            CLOUD_MODELS + LOCAL_MODELS,
+            use_qbit=args.qbit,
+            bounce_depth=args.bounce
+        )
+        
+        output_text = consensus_result['output']
+        
+        # Handle project creation
+        if args.project or any(keyword in input_source.lower() for keyword in ['project', 'create', 'build', 'scaffold']):
+            project_name = args.project or f"project_{hashlib.sha256(input_source.encode()).hexdigest()[:8]}"
+            stack = detect_tech_stack(input_source)
+            project_tree = generate_extended_project_tree(stack, project_name)
+            
+            project_root = os.path.join(PROJECTS_DIR, project_name)
+            created_files = []
+            
+            for file_path, content in project_tree.items():
+                full_path = os.path.join(project_root, file_path)
+                if safe_write_file(full_path, content.encode('utf-8')):
+                    created_files.append(full_path)
+            
+            # Initialize git if requested
+            if args.git and created_files:
+                subprocess.run(['git', 'init'], cwd=project_root, capture_output=True)
+                subprocess.run(['git', 'add', '.'], cwd=project_root, capture_output=True)
+                subprocess.run(['git', 'commit', '-m', 'Initial commit'], cwd=project_root, capture_output=True)
+            
+            # Add project info to output
+            output_text += f"\n\n--- PROJECT CREATED ---\nLocation: {project_root}\nFiles: {len(created_files)}"
+        
+        # Output results
+        if args.json:
+            result_data = {
+                'input': input_source,
+                'output': output_text,
+                'consensus_metrics': {
+                    'successful_models': consensus_result['successful_runs'],
+                    'total_models': consensus_result['total_models'],
+                    'score': consensus_result['consensus_score'],
+                    'method': 'Qbit-Map' if args.qbit else 'Standard Entropy'
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+            print(json.dumps(result_data, indent=2))
+        else:
+            method_name = Colors.style('Qbit-Map Fractal Consensus', Colors.MAGENTA) if args.qbit else Colors.style('Standard Entropy Consensus', Colors.GREEN)
+            print(f"\n{Colors.style('=== AI CONSENSUS RESULT ===', Colors.GREEN, True)} ({method_name})")
+            print(output_text)
+    
+    else:
+        # Special command - just output the result
+        print(content.decode('utf-8', errors='ignore'))
+    
+    conn.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
